@@ -110,6 +110,10 @@ pub fn draw(frame: &mut Frame, app: &App) {
         draw_rename_popup(frame, app, area);
         return;
     }
+    if app.focus == Focus::CreatingDirectory {
+        draw_create_directory_popup(frame, app, area);
+        return;
+    }
     if app.template_picker_active {
         draw_template_picker_popup(frame, app, area);
         return;
@@ -270,6 +274,23 @@ fn draw_rename_popup(frame: &mut Frame, app: &App, area: Rect) {
     let content = Line::from(vec![
         Span::styled("New name: ", app.theme.help_text_style),
         Span::styled(&app.rename_input, app.theme.highlight_style),
+    ]);
+    frame.render_widget(Paragraph::new(content), inner);
+}
+
+fn draw_create_directory_popup(frame: &mut Frame, app: &App, area: Rect) {
+    let block = Block::default()
+        .title(" Shift+n │ New Directory ")
+        .borders(Borders::ALL)
+        .border_style(app.theme.list_border_active_style);
+    let popup_area = centered_rect(area, 50, 15);
+    let inner = block.inner(popup_area);
+    frame.render_widget(Clear, popup_area);
+    frame.render_widget(block, popup_area);
+
+    let content = Line::from(vec![
+        Span::styled("New directory name: ", app.theme.help_text_style),
+        Span::styled(&app.directory_input, app.theme.highlight_style),
     ]);
     frame.render_widget(Paragraph::new(content), inner);
 }
@@ -526,6 +547,8 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
                     Span::styled("commands", app.theme.highlight_style),
                     Span::styled(" | r ", app.theme.help_text_style),
                     Span::styled("rename", app.theme.highlight_style),
+                    Span::styled(" | N ", app.theme.help_text_style),
+                    Span::styled("mkdir", app.theme.highlight_style),
                     Span::styled(" | F11 ", app.theme.help_text_style),
                     Span::styled("zen", app.theme.highlight_style),
                     Span::styled(" | q ", app.theme.help_text_style),

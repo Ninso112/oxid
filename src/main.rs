@@ -144,6 +144,17 @@ fn run_app(
                         _ => {}
                     }
                 }
+                Focus::CreatingDirectory => {
+                    match key.code {
+                        KeyCode::Esc => app.exit_create_directory(),
+                        KeyCode::Enter => {
+                            let _ = app.create_directory();
+                        }
+                        KeyCode::Backspace => app.directory_backspace(),
+                        KeyCode::Char(c) => app.directory_add_char(c),
+                        _ => {}
+                    }
+                }
                 Focus::List => {
                     if app.template_picker_active {
                         match key.code {
@@ -169,6 +180,7 @@ fn run_app(
                                     KeyCode::Down | KeyCode::Char('j') => app.move_selection_down(),
                                     KeyCode::Char('/') => app.enter_search_mode(),
                                     KeyCode::Char('n') => app.enter_create_mode(),
+                                    KeyCode::Char('N') => app.enter_create_directory(),
                                     KeyCode::Char('r') => app.enter_rename(),
                                     KeyCode::Char('c') => {
                                         if let Ok(config_path) = config::config_file_path() {

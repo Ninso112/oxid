@@ -41,6 +41,8 @@ pub enum Focus {
     CommandPalette,
     /// Rename file popup (r).
     Rename,
+    /// Create directory popup (Shift+n).
+    CreatingDirectory,
 }
 
 /// Single editor buffer (tab).
@@ -196,6 +198,9 @@ pub struct App {
     // Rename popup
     pub rename_input: String,
 
+    // Create directory popup (Shift+n)
+    pub directory_input: String,
+
     // Template picker for new files
     pub template_picker_active: bool,
     pub template_picker_selected: usize,
@@ -295,6 +300,7 @@ impl App {
             command_palette_filtered: CommandAction::all().to_vec(),
             command_palette_selected: 0,
             rename_input: String::new(),
+            directory_input: String::new(),
             template_picker_active: false,
             template_picker_selected: 0,
             spellchecker,
@@ -790,6 +796,44 @@ impl App {
         }
         self.exit_rename();
         self.message = Some("Renamed".to_string());
+        Ok(())
+    }
+
+    // Create directory popup (Shift+n)
+    pub fn enter_create_directory(&mut self) {
+        self.directory_input.clear();
+        self.focus = Focus::CreatingDirectory;
+    }
+
+    pub fn exit_create_directory(&mut self) {
+        self.focus = Focus::List;
+        self.directory_input.clear();
+    }
+
+    pub fn directory_add_char(&mut self, c: char) {
+        self.directory_input.push(c);
+    }
+
+    pub fn directory_backspace(&mut self) {
+        self.directory_input.pop();
+    }
+
+    pub fn create_directory(&mut self) -> Result<()> {
+        let name = self.directory_input.trim().to_string();
+        if name.is_empty() {
+            self.message = Some("Directory name cannot be empty".to_string());
+            return Ok(());
+        }
+        let path = self.notes_dir.join(&name);
+        if path.exists() {
+            self.message = Some("Directory already exists".to_string());
+            return Ok(());
+        }
+        fs::create_dir(&path)
+            .map_err(|e| anyhow::anyhow!("Failed to create directory: {}", e))?;
+        self.exit_create_directory();
+        self.refresh_notes()?;
+        self.message = Some(format!("Created directory: {}", name));
         Ok(())
     }
 
