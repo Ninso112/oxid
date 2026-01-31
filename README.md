@@ -20,6 +20,7 @@
 ### Workspace
 
 - **File explorer** – browse your notes directory in a side panel.
+- **Create directories** – `Shift+n` to create a new folder in the notes directory.
 - **Preview pane** – select files to see their content rendered as Markdown in real time.
 - Quick navigation between list and editor with `q` (back) and `Enter` (open).
 
@@ -158,13 +159,14 @@ Colors and styles are fully configurable via `theme.toml`. Hex (`#RRGGBB`) or na
 | `Ctrl+p` | Command palette |
 | `F11` | Toggle Zen mode |
 
-### List Focus
+### File Explorer (List Focus)
 
 | Key | Action |
 |-----|--------|
 | `j` / `k` | Move selection |
 | `Enter` | Open note |
 | `n` | Create new note |
+| `Shift+n` | Create new folder |
 | `r` | Rename file |
 | `d` / `Delete` | Delete file |
 | `c` | Edit config |
