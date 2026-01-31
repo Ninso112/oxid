@@ -281,37 +281,100 @@ impl ResolvedKeys {
         let def_del = KeyEvent::new(KeyCode::Delete, KeyModifiers::empty());
 
         Self {
-            quit: parse_or(&keys.quit, KeyEvent::new(KeyCode::Char('q'), KeyModifiers::empty())),
-            zen_mode: parse_or(&keys.zen_mode, KeyEvent::new(KeyCode::F(11), KeyModifiers::empty())),
-            search: parse_or(&keys.search, KeyEvent::new(KeyCode::Char('/'), KeyModifiers::empty())),
-            command_palette: parse_or(&keys.command_palette, KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL)),
-            daily_note: parse_or(&keys.daily_note, KeyEvent::new(KeyCode::Char('d'), KeyModifiers::ALT)),
-            task_board: parse_or(&keys.task_board, KeyEvent::new(KeyCode::Char('t'), KeyModifiers::ALT)),
+            quit: parse_or(
+                &keys.quit,
+                KeyEvent::new(KeyCode::Char('q'), KeyModifiers::empty()),
+            ),
+            zen_mode: parse_or(
+                &keys.zen_mode,
+                KeyEvent::new(KeyCode::F(11), KeyModifiers::empty()),
+            ),
+            search: parse_or(
+                &keys.search,
+                KeyEvent::new(KeyCode::Char('/'), KeyModifiers::empty()),
+            ),
+            command_palette: parse_or(
+                &keys.command_palette,
+                KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL),
+            ),
+            daily_note: parse_or(
+                &keys.daily_note,
+                KeyEvent::new(KeyCode::Char('d'), KeyModifiers::ALT),
+            ),
+            task_board: parse_or(
+                &keys.task_board,
+                KeyEvent::new(KeyCode::Char('t'), KeyModifiers::ALT),
+            ),
             escape: parse_or(&keys.escape, def_esc),
             enter: parse_or(&keys.enter, def_enter),
             backspace: parse_or(&keys.backspace, def_backspace),
             move_up: parse_or(&keys.move_up, def_k),
             move_down: parse_or(&keys.move_down, def_j),
             move_left: parse_or(&keys.move_left, def_h),
-            move_up_alt: parse_or(&keys.move_up_alt, KeyEvent::new(KeyCode::Up, KeyModifiers::empty())),
-            move_down_alt: parse_or(&keys.move_down_alt, KeyEvent::new(KeyCode::Down, KeyModifiers::empty())),
+            move_up_alt: parse_or(
+                &keys.move_up_alt,
+                KeyEvent::new(KeyCode::Up, KeyModifiers::empty()),
+            ),
+            move_down_alt: parse_or(
+                &keys.move_down_alt,
+                KeyEvent::new(KeyCode::Down, KeyModifiers::empty()),
+            ),
             move_left_alt: parse_or(&keys.move_left_alt, def_left),
             delete: parse_or(&keys.delete, def_del),
-            list_create_note: parse_or(&keys.list_create_note, KeyEvent::new(KeyCode::Char('n'), KeyModifiers::empty())),
-            list_create_dir: parse_or(&keys.list_create_dir, KeyEvent::new(KeyCode::Char('n'), KeyModifiers::SHIFT)),
-            list_tag_explorer: parse_or(&keys.list_tag_explorer, KeyEvent::new(KeyCode::Char('t'), KeyModifiers::SHIFT)),
-            list_rename: parse_or(&keys.list_rename, KeyEvent::new(KeyCode::Char('r'), KeyModifiers::empty())),
-            list_edit_config: parse_or(&keys.list_edit_config, KeyEvent::new(KeyCode::Char('c'), KeyModifiers::empty())),
-            list_delete: parse_or(&keys.list_delete, KeyEvent::new(KeyCode::Char('d'), KeyModifiers::empty())),
+            list_create_note: parse_or(
+                &keys.list_create_note,
+                KeyEvent::new(KeyCode::Char('n'), KeyModifiers::empty()),
+            ),
+            list_create_dir: parse_or(
+                &keys.list_create_dir,
+                KeyEvent::new(KeyCode::Char('n'), KeyModifiers::SHIFT),
+            ),
+            list_tag_explorer: parse_or(
+                &keys.list_tag_explorer,
+                KeyEvent::new(KeyCode::Char('t'), KeyModifiers::SHIFT),
+            ),
+            list_rename: parse_or(
+                &keys.list_rename,
+                KeyEvent::new(KeyCode::Char('r'), KeyModifiers::empty()),
+            ),
+            list_edit_config: parse_or(
+                &keys.list_edit_config,
+                KeyEvent::new(KeyCode::Char('c'), KeyModifiers::empty()),
+            ),
+            list_delete: parse_or(
+                &keys.list_delete,
+                KeyEvent::new(KeyCode::Char('d'), KeyModifiers::empty()),
+            ),
             list_parent: parse_or(&keys.list_parent, def_backspace),
             list_parent_alt: parse_or(&keys.list_parent_alt, def_left),
-            editor_back: parse_or(&keys.editor_back, KeyEvent::new(KeyCode::Char('q'), KeyModifiers::empty())),
-            editor_pdf: parse_or(&keys.editor_pdf, KeyEvent::new(KeyCode::Char('e'), KeyModifiers::CONTROL)),
-            editor_backlinks: parse_or(&keys.editor_backlinks, KeyEvent::new(KeyCode::Char('b'), KeyModifiers::CONTROL)),
-            editor_wiki_link: parse_or(&keys.editor_wiki_link, KeyEvent::new(KeyCode::Char(']'), KeyModifiers::CONTROL)),
-            editor_insert: parse_or(&keys.editor_insert, KeyEvent::new(KeyCode::Char('i'), KeyModifiers::empty())),
-            editor_append: parse_or(&keys.editor_append, KeyEvent::new(KeyCode::Char('a'), KeyModifiers::empty())),
-            editor_split_focus: parse_or(&keys.editor_split_focus, KeyEvent::new(KeyCode::Tab, KeyModifiers::empty())),
+            editor_back: parse_or(
+                &keys.editor_back,
+                KeyEvent::new(KeyCode::Char('q'), KeyModifiers::empty()),
+            ),
+            editor_pdf: parse_or(
+                &keys.editor_pdf,
+                KeyEvent::new(KeyCode::Char('e'), KeyModifiers::CONTROL),
+            ),
+            editor_backlinks: parse_or(
+                &keys.editor_backlinks,
+                KeyEvent::new(KeyCode::Char('b'), KeyModifiers::CONTROL),
+            ),
+            editor_wiki_link: parse_or(
+                &keys.editor_wiki_link,
+                KeyEvent::new(KeyCode::Char(']'), KeyModifiers::CONTROL),
+            ),
+            editor_insert: parse_or(
+                &keys.editor_insert,
+                KeyEvent::new(KeyCode::Char('i'), KeyModifiers::empty()),
+            ),
+            editor_append: parse_or(
+                &keys.editor_append,
+                KeyEvent::new(KeyCode::Char('a'), KeyModifiers::empty()),
+            ),
+            editor_split_focus: parse_or(
+                &keys.editor_split_focus,
+                KeyEvent::new(KeyCode::Tab, KeyModifiers::empty()),
+            ),
         }
     }
 }
@@ -350,7 +413,9 @@ pub fn key_display_string(s: &str) -> String {
         "down" => "↓".to_string(),
         "left" => "←".to_string(),
         "right" => "→".to_string(),
-        s if matches!(s, "f1" | "f2" | "f3" | "f4" | "f5" | "f6" | "f7" | "f8" | "f9" | "f10" | "f11" | "f12") => key_part.to_uppercase(),
+        "f1" | "f2" | "f3" | "f4" | "f5" | "f6" | "f7" | "f8" | "f9" | "f10" | "f11" | "f12" => {
+            key_part.to_uppercase()
+        }
         _ if key_part.len() == 1 => key_part.to_uppercase(),
         _ => key_part.to_string(),
     };
@@ -403,11 +468,15 @@ pub fn config_file_path() -> Result<PathBuf> {
 /// Returns the Oxid config directory (~/.config/oxid).
 /// Creates it if it does not exist.
 pub fn ensure_config_dir() -> Result<PathBuf> {
-    let dirs = ProjectDirs::from("", "", "oxid")
-        .context("Could not determine XDG config directory")?;
+    let dirs =
+        ProjectDirs::from("", "", "oxid").context("Could not determine XDG config directory")?;
     let config_dir = dirs.config_dir().to_path_buf();
-    fs::create_dir_all(&config_dir)
-        .with_context(|| format!("Failed to create config directory: {}", config_dir.display()))?;
+    fs::create_dir_all(&config_dir).with_context(|| {
+        format!(
+            "Failed to create config directory: {}",
+            config_dir.display()
+        )
+    })?;
     Ok(config_dir)
 }
 
@@ -425,8 +494,9 @@ pub fn load_config() -> Result<Config> {
     } else {
         let default = Config::default();
         let content = generate_default_config(&default);
-        fs::write(&config_path, content)
-            .with_context(|| format!("Failed to write default config: {}", config_path.display()))?;
+        fs::write(&config_path, content).with_context(|| {
+            format!("Failed to write default config: {}", config_path.display())
+        })?;
         default
     };
 

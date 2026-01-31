@@ -80,7 +80,8 @@ impl Spellchecker {
 
     /// Extract misspelled words from text. Returns set of (start_byte, end_byte) for each misspelled word.
     pub fn find_misspelled_ranges(&self, text: &str) -> Vec<(usize, usize)> {
-        let re = Regex::new(r"\b[a-zA-Z][a-zA-Z']*\b").unwrap_or_else(|_| Regex::new(r"\b\w+\b").unwrap());
+        let re = Regex::new(r"\b[a-zA-Z][a-zA-Z']*\b")
+            .unwrap_or_else(|_| Regex::new(r"\b\w+\b").unwrap());
         let mut ranges = Vec::new();
         for mat in re.find_iter(text) {
             let word = mat.as_str();

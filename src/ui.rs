@@ -30,8 +30,7 @@ fn build_highlighted_line(
     if match_indices.is_empty() {
         return Line::from(Span::styled(text.to_string(), base_style));
     }
-    let match_set: std::collections::HashSet<u32> =
-        match_indices.into_iter().collect();
+    let match_set: std::collections::HashSet<u32> = match_indices.into_iter().collect();
     let mut spans = Vec::new();
     for (i, c) in text.chars().enumerate() {
         let style = if match_set.contains(&(i as u32)) {
@@ -101,10 +100,7 @@ fn centered_rect(area: Rect, percent_x: u16, percent_y: u16) -> Rect {
 pub fn draw(frame: &mut Frame, app: &App) {
     let area = frame.area();
 
-    frame.render_widget(
-        Block::default().style(app.theme.app_background_style),
-        area,
-    );
+    frame.render_widget(Block::default().style(app.theme.app_background_style), area);
 
     // Draw popups on top
     if app.focus == Focus::Search {
@@ -129,6 +125,10 @@ pub fn draw(frame: &mut Frame, app: &App) {
     }
     if app.focus == Focus::CreatingDirectory {
         draw_create_directory_popup(frame, app, area);
+        return;
+    }
+    if app.focus == Focus::DeleteConfirm {
+        draw_delete_confirm_popup(frame, app, area);
         return;
     }
     if app.template_picker_active {
@@ -213,7 +213,10 @@ pub fn draw(frame: &mut Frame, app: &App) {
 
 fn draw_telescope_popup(frame: &mut Frame, app: &App, area: Rect) {
     let block = Block::default()
-        .title(format!(" {} │ Open File ", app.get_key_display_string("search")))
+        .title(format!(
+            " {} │ Open File ",
+            app.get_key_display_string("search")
+        ))
         .borders(Borders::ALL)
         .border_type(border_type_from_config(&app.config.ui.border_style))
         .border_style(app.theme.list_border_active_style);
@@ -224,10 +227,7 @@ fn draw_telescope_popup(frame: &mut Frame, app: &App, area: Rect) {
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(1),
-            Constraint::Min(1),
-        ])
+        .constraints([Constraint::Length(1), Constraint::Min(1)])
         .split(inner);
 
     let query_line = Line::from(vec![
@@ -249,7 +249,10 @@ fn draw_telescope_popup(frame: &mut Frame, app: &App, area: Rect) {
             let line = if !app.telescope_query.is_empty() && !app.telescope_query.starts_with('#') {
                 build_highlighted_line(
                     &note.display,
-                    app.telescope_match_indices.get(i).cloned().unwrap_or_default(),
+                    app.telescope_match_indices
+                        .get(i)
+                        .cloned()
+                        .unwrap_or_default(),
                     base_style,
                     app.theme.search_match_style,
                 )
@@ -266,7 +269,10 @@ fn draw_telescope_popup(frame: &mut Frame, app: &App, area: Rect) {
 
 fn draw_command_palette_popup(frame: &mut Frame, app: &App, area: Rect) {
     let block = Block::default()
-        .title(format!(" {} │ Command Palette ", app.get_key_display_string("command_palette")))
+        .title(format!(
+            " {} │ Command Palette ",
+            app.get_key_display_string("command_palette")
+        ))
         .borders(Borders::ALL)
         .border_type(border_type_from_config(&app.config.ui.border_style))
         .border_style(app.theme.list_border_active_style);
@@ -277,10 +283,7 @@ fn draw_command_palette_popup(frame: &mut Frame, app: &App, area: Rect) {
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(1),
-            Constraint::Min(1),
-        ])
+        .constraints([Constraint::Length(1), Constraint::Min(1)])
         .split(inner);
 
     let query_line = Line::from(vec![
@@ -299,10 +302,7 @@ fn draw_command_palette_popup(frame: &mut Frame, app: &App, area: Rect) {
             } else {
                 app.theme.list_text_normal_style
             };
-            ListItem::new(Line::from(Span::styled(
-                action.label(),
-                style,
-            )))
+            ListItem::new(Line::from(Span::styled(action.label(), style)))
         })
         .collect();
 
@@ -312,7 +312,10 @@ fn draw_command_palette_popup(frame: &mut Frame, app: &App, area: Rect) {
 
 fn draw_rename_popup(frame: &mut Frame, app: &App, area: Rect) {
     let block = Block::default()
-        .title(format!(" {} │ Rename File ", app.get_key_display_string("list_rename")))
+        .title(format!(
+            " {} │ Rename File ",
+            app.get_key_display_string("list_rename")
+        ))
         .borders(Borders::ALL)
         .border_type(border_type_from_config(&app.config.ui.border_style))
         .border_style(app.theme.list_border_active_style);
@@ -328,9 +331,33 @@ fn draw_rename_popup(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(Paragraph::new(content), inner);
 }
 
+fn draw_delete_confirm_popup(frame: &mut Frame, app: &App, area: Rect) {
+    let block = Block::default()
+        .title(" Delete ")
+        .borders(Borders::ALL)
+        .border_type(border_type_from_config(&app.config.ui.border_style))
+        .border_style(app.theme.list_border_active_style);
+    let popup_area = centered_rect(area, 50, 15);
+    let inner = block.inner(popup_area);
+    frame.render_widget(Clear, popup_area);
+    frame.render_widget(block, popup_area);
+
+    let name = app
+        .delete_pending
+        .as_ref()
+        .map(|e| e.display.as_str())
+        .unwrap_or("?");
+    let content = Line::from(vec![
+        Span::styled("Delete ", app.theme.help_text_style),
+        Span::styled(name, app.theme.highlight_style),
+        Span::styled("? [y/N] ", app.theme.help_text_style),
+    ]);
+    frame.render_widget(Paragraph::new(content), inner);
+}
+
 fn draw_tag_explorer_popup(frame: &mut Frame, app: &App, area: Rect) {
     use crate::app::TagExplorerView;
-    
+
     let popup_area = {
         let vertical = Layout::default()
             .direction(Direction::Vertical)
@@ -376,7 +403,11 @@ fn draw_tag_explorer_popup(frame: &mut Frame, app: &App, area: Rect) {
         );
         frame.render_widget(list, popup_area);
     } else {
-        let selected_tag = app.all_tags.get(app.tag_selected).map(|s| s.as_str()).unwrap_or("");
+        let selected_tag = app
+            .all_tags
+            .get(app.tag_selected)
+            .map(|s| s.as_str())
+            .unwrap_or("");
         let items: Vec<ListItem> = app
             .tag_files
             .iter()
@@ -402,7 +433,11 @@ fn draw_tag_explorer_popup(frame: &mut Frame, app: &App, area: Rect) {
 
         let list = List::new(items).block(
             Block::default()
-                .title(format!(" Files with #{} ({} files) ", selected_tag, app.tag_files.len()))
+                .title(format!(
+                    " Files with #{} ({} files) ",
+                    selected_tag,
+                    app.tag_files.len()
+                ))
                 .borders(Borders::ALL)
                 .border_type(border_type_from_config(&app.config.ui.border_style))
                 .border_style(app.theme.border_style),
@@ -465,7 +500,14 @@ fn draw_task_view_popup(frame: &mut Frame, app: &App, area: Rect) {
 
     let list = List::new(items).block(
         Block::default()
-            .title(format!(" Task Board ({} tasks) │ {}/{} move │ {} open │ {} close ", app.tasks.len(), app.get_key_display_string("move_down"), app.get_key_display_string("move_up"), app.get_key_display_string("enter"), app.get_key_display_string("escape")))
+            .title(format!(
+                " Task Board ({} tasks) │ {}/{} move │ {} open │ {} close ",
+                app.tasks.len(),
+                app.get_key_display_string("move_down"),
+                app.get_key_display_string("move_up"),
+                app.get_key_display_string("enter"),
+                app.get_key_display_string("escape")
+            ))
             .borders(Borders::ALL)
             .border_type(border_type_from_config(&app.config.ui.border_style))
             .border_style(app.theme.border_style),
@@ -475,7 +517,10 @@ fn draw_task_view_popup(frame: &mut Frame, app: &App, area: Rect) {
 
 fn draw_create_directory_popup(frame: &mut Frame, app: &App, area: Rect) {
     let block = Block::default()
-        .title(format!(" {} │ New Directory ", app.get_key_display_string("list_create_dir")))
+        .title(format!(
+            " {} │ New Directory ",
+            app.get_key_display_string("list_create_dir")
+        ))
         .borders(Borders::ALL)
         .border_type(border_type_from_config(&app.config.ui.border_style))
         .border_style(app.theme.list_border_active_style);
@@ -525,13 +570,11 @@ fn draw_header(frame: &mut Frame, app: &App, area: Rect) {
     } else {
         "⚡ Oxid - TUI Note Editor"
     };
-    let header = Paragraph::new(title)
-        .style(app.theme.header_style)
-        .block(
-            Block::default()
-                .borders(Borders::BOTTOM)
-                .border_style(app.theme.border_style),
-        );
+    let header = Paragraph::new(title).style(app.theme.header_style).block(
+        Block::default()
+            .borders(Borders::BOTTOM)
+            .border_style(app.theme.border_style),
+    );
     frame.render_widget(header, area);
 }
 
@@ -566,13 +609,12 @@ fn draw_tab_bar(frame: &mut Frame, app: &App, area: Rect) {
     } else {
         Line::from(tab_spans)
     };
-    let tab_bar = Paragraph::new(line)
-        .block(
-            Block::default()
-                .borders(Borders::BOTTOM)
-                .border_type(border_type_from_config(&app.config.ui.border_style))
-                .border_style(app.theme.border_style),
-        );
+    let tab_bar = Paragraph::new(line).block(
+        Block::default()
+            .borders(Borders::BOTTOM)
+            .border_type(border_type_from_config(&app.config.ui.border_style))
+            .border_style(app.theme.border_style),
+    );
     frame.render_widget(tab_bar, area);
 }
 
@@ -594,7 +636,9 @@ fn draw_notes_list(frame: &mut Frame, app: &App, area: Rect) {
         .map(|(i, note)| {
             let base_style = if i == app.selected {
                 if note.is_directory {
-                    app.theme.list_directory_style.patch(app.theme.list_text_selected_style)
+                    app.theme
+                        .list_directory_style
+                        .patch(app.theme.list_text_selected_style)
                 } else {
                     app.theme.list_text_selected_style
                 }
@@ -672,7 +716,8 @@ fn draw_editor_pane_at(frame: &mut Frame, app: &App, area: Rect, buf_idx: usize)
                 .border_style(editor_border_style);
             let placeholder = Paragraph::new("(Select a note with Enter)")
                 .style(
-                    app.theme.editor_fg_style
+                    app.theme
+                        .editor_fg_style
                         .patch(app.theme.editor_bg_style)
                         .add_modifier(Modifier::ITALIC),
                 )
@@ -739,14 +784,12 @@ fn draw_preview_pane(frame: &mut Frame, app: &App, area: Rect) {
         }
     };
 
-    let paragraph = Paragraph::new(content)
-        .wrap(Wrap { trim: true })
-        .block(
-            Block::default()
-                .title(" Preview ")
-                .borders(Borders::ALL)
-                .border_style(mode),
-        );
+    let paragraph = Paragraph::new(content).wrap(Wrap { trim: true }).block(
+        Block::default()
+            .title(" Preview ")
+            .borders(Borders::ALL)
+            .border_style(mode),
+    );
     frame.render_widget(paragraph, area);
 }
 
@@ -795,11 +838,24 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
         (
             " Backlinks ",
             vec![
-                Span::styled(format!("{}/{} ", app.get_key_display_string("move_down"), app.get_key_display_string("move_up")), app.theme.help_text_style),
+                Span::styled(
+                    format!(
+                        "{}/{} ",
+                        app.get_key_display_string("move_down"),
+                        app.get_key_display_string("move_up")
+                    ),
+                    app.theme.help_text_style,
+                ),
                 Span::styled("navigate", app.theme.highlight_style),
-                Span::styled(format!(" | {} ", app.get_key_display_string("enter")), app.theme.help_text_style),
+                Span::styled(
+                    format!(" | {} ", app.get_key_display_string("enter")),
+                    app.theme.help_text_style,
+                ),
                 Span::styled("open", app.theme.highlight_style),
-                Span::styled(format!(" | {} ", app.get_key_display_string("escape")), app.theme.help_text_style),
+                Span::styled(
+                    format!(" | {} ", app.get_key_display_string("escape")),
+                    app.theme.help_text_style,
+                ),
                 Span::styled("back", app.theme.highlight_style),
             ],
         )
@@ -807,11 +863,24 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
         (
             " Editor ",
             vec![
-                Span::styled(format!("{}/{} ", app.get_key_display_string("editor_insert"), app.get_key_display_string("editor_append")), app.theme.help_text_style),
+                Span::styled(
+                    format!(
+                        "{}/{} ",
+                        app.get_key_display_string("editor_insert"),
+                        app.get_key_display_string("editor_append")
+                    ),
+                    app.theme.help_text_style,
+                ),
                 Span::styled("insert", app.theme.highlight_style),
-                Span::styled(format!(" | {} ", app.get_key_display_string("escape")), app.theme.help_text_style),
+                Span::styled(
+                    format!(" | {} ", app.get_key_display_string("escape")),
+                    app.theme.help_text_style,
+                ),
                 Span::styled("normal", app.theme.highlight_style),
-                Span::styled(format!(" | {} ", app.get_key_display_string("editor_back")), app.theme.help_text_style),
+                Span::styled(
+                    format!(" | {} ", app.get_key_display_string("editor_back")),
+                    app.theme.help_text_style,
+                ),
                 Span::styled("back", app.theme.highlight_style),
             ],
         )
@@ -820,19 +889,44 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
             Mode::Normal => (
                 " Normal ",
                 vec![
-                    Span::styled(format!("{} ", app.get_key_display_string("search")), app.theme.help_text_style),
+                    Span::styled(
+                        format!("{} ", app.get_key_display_string("search")),
+                        app.theme.help_text_style,
+                    ),
                     Span::styled("search", app.theme.highlight_style),
-                    Span::styled(format!(" | {} ", app.get_key_display_string("command_palette")), app.theme.help_text_style),
+                    Span::styled(
+                        format!(" | {} ", app.get_key_display_string("command_palette")),
+                        app.theme.help_text_style,
+                    ),
                     Span::styled("commands", app.theme.highlight_style),
-                    Span::styled(format!(" | {} ", app.get_key_display_string("list_rename")), app.theme.help_text_style),
+                    Span::styled(
+                        format!(" | {} ", app.get_key_display_string("list_rename")),
+                        app.theme.help_text_style,
+                    ),
                     Span::styled("rename", app.theme.highlight_style),
-                    Span::styled(format!(" | {} ", app.get_key_display_string("list_create_dir")), app.theme.help_text_style),
+                    Span::styled(
+                        format!(" | {} ", app.get_key_display_string("list_create_dir")),
+                        app.theme.help_text_style,
+                    ),
                     Span::styled("mkdir", app.theme.highlight_style),
-                    Span::styled(format!(" | {}/{} ", app.get_key_display_string("move_left_alt"), app.get_key_display_string("move_left")), app.theme.help_text_style),
+                    Span::styled(
+                        format!(
+                            " | {}/{} ",
+                            app.get_key_display_string("move_left_alt"),
+                            app.get_key_display_string("move_left")
+                        ),
+                        app.theme.help_text_style,
+                    ),
                     Span::styled("up", app.theme.highlight_style),
-                    Span::styled(format!(" | {} ", app.get_key_display_string("zen_mode")), app.theme.help_text_style),
+                    Span::styled(
+                        format!(" | {} ", app.get_key_display_string("zen_mode")),
+                        app.theme.help_text_style,
+                    ),
                     Span::styled("zen", app.theme.highlight_style),
-                    Span::styled(format!(" | {} ", app.get_key_display_string("quit")), app.theme.help_text_style),
+                    Span::styled(
+                        format!(" | {} ", app.get_key_display_string("quit")),
+                        app.theme.help_text_style,
+                    ),
                     Span::styled("quit", app.theme.highlight_style),
                 ],
             ),
@@ -840,9 +934,15 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
                 " Search ",
                 vec![
                     Span::styled(&app.search_query, app.theme.highlight_style),
-                    Span::styled(format!(" | {} ", app.get_key_display_string("escape")), app.theme.help_text_style),
+                    Span::styled(
+                        format!(" | {} ", app.get_key_display_string("escape")),
+                        app.theme.help_text_style,
+                    ),
                     Span::styled("back", app.theme.highlight_style),
-                    Span::styled(format!(" | {} ", app.get_key_display_string("enter")), app.theme.help_text_style),
+                    Span::styled(
+                        format!(" | {} ", app.get_key_display_string("enter")),
+                        app.theme.help_text_style,
+                    ),
                     Span::styled("edit", app.theme.highlight_style),
                 ],
             ),
@@ -851,9 +951,15 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
                 vec![
                     Span::styled("Filename: ", app.theme.help_text_style),
                     Span::styled(&app.create_filename, app.theme.highlight_style),
-                    Span::styled(format!(" | {} ", app.get_key_display_string("enter")), app.theme.help_text_style),
+                    Span::styled(
+                        format!(" | {} ", app.get_key_display_string("enter")),
+                        app.theme.help_text_style,
+                    ),
                     Span::styled("template", app.theme.highlight_style),
-                    Span::styled(format!(" | {} ", app.get_key_display_string("escape")), app.theme.help_text_style),
+                    Span::styled(
+                        format!(" | {} ", app.get_key_display_string("escape")),
+                        app.theme.help_text_style,
+                    ),
                     Span::styled("cancel", app.theme.highlight_style),
                 ],
             ),
@@ -864,14 +970,10 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
 
     // Git status indicator (uses theme statusbar styles)
     match app.git_status() {
-        GitStatus::Clean => spans.push(Span::styled(
-            " | Git: Clean ",
-            app.theme.statusbar_fg_style,
-        )),
-        GitStatus::Dirty => spans.push(Span::styled(
-            " | Git: Dirty ",
-            app.theme.highlight_style,
-        )),
+        GitStatus::Clean => {
+            spans.push(Span::styled(" | Git: Clean ", app.theme.statusbar_fg_style))
+        }
+        GitStatus::Dirty => spans.push(Span::styled(" | Git: Dirty ", app.theme.highlight_style)),
         GitStatus::Unknown => {}
     }
 
@@ -892,15 +994,13 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
     }
 
     let border_type = border_type_from_config(&app.config.ui.border_style);
-    let footer = Paragraph::new(lines)
-        .wrap(Wrap { trim: true })
-        .block(
-            Block::default()
-                .title(title)
-                .borders(Borders::ALL)
-                .border_type(border_type)
-                .border_style(app.theme.border_style)
-                .style(app.theme.statusbar_bg_style),
-        );
+    let footer = Paragraph::new(lines).wrap(Wrap { trim: true }).block(
+        Block::default()
+            .title(title)
+            .borders(Borders::ALL)
+            .border_type(border_type)
+            .border_style(app.theme.border_style)
+            .style(app.theme.statusbar_bg_style),
+    );
     frame.render_widget(footer, area);
 }

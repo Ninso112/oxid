@@ -2,8 +2,8 @@
 // oxid - A fast, keyboard-driven note manager TUI for Linux
 
 use crate::config::{expand_path, key_display_string, load_config, Config, ResolvedKeys};
-use crate::handlers::key_matches;
 use crate::git::{get_git_status, GitStatus};
+use crate::handlers::key_matches;
 use crate::search::{filter_notes, get_match_indices};
 use crate::spellcheck::Spellchecker;
 use crate::telescope::{
@@ -52,6 +52,8 @@ pub enum Focus {
     TagExplorer,
     /// Global task board (unchecked tasks).
     TaskView,
+    /// Delete confirmation popup (N/y).
+    DeleteConfirm,
 }
 
 /// Single editor buffer (tab).
@@ -234,6 +236,9 @@ pub struct App {
     // Create directory popup (Shift+n)
     pub directory_input: String,
 
+    // Delete confirmation (pending entry)
+    pub delete_pending: Option<NoteEntry>,
+
     // Template picker for new files
     pub template_picker_active: bool,
     pub template_picker_selected: usize,
@@ -280,7 +285,9 @@ impl App {
             if self.split_focus_left {
                 self.active_tab
             } else {
-                self.split_right_tab.unwrap_or(0).min(self.buffers.len().saturating_sub(1))
+                self.split_right_tab
+                    .unwrap_or(0)
+                    .min(self.buffers.len().saturating_sub(1))
             }
         } else {
             self.active_tab
@@ -364,11 +371,12 @@ impl App {
         buf.textarea.set_max_histories(50);
         let buffers = vec![buf];
 
-        let spellchecker = if config.editor.enable_spellcheck && !config.editor.spellcheck_languages.is_empty() {
-            Some(Spellchecker::new(&config.editor.spellcheck_languages))
-        } else {
-            None
-        };
+        let spellchecker =
+            if config.editor.enable_spellcheck && !config.editor.spellcheck_languages.is_empty() {
+                Some(Spellchecker::new(&config.editor.spellcheck_languages))
+            } else {
+                None
+            };
 
         let resolved_keys = ResolvedKeys::from_config(&config.keys);
         let mut app = Self {
@@ -405,6 +413,7 @@ impl App {
             command_palette_selected: 0,
             rename_input: String::new(),
             directory_input: String::new(),
+            delete_pending: None,
             template_picker_active: false,
             template_picker_selected: 0,
             spellchecker,
@@ -431,8 +440,7 @@ impl App {
     pub fn refresh_notes(&mut self) -> Result<()> {
         self.all_notes = load_entries(&self.current_dir)?;
         if !self.config.ui.show_hidden {
-            self.all_notes
-                .retain(|e| !e.display.starts_with('.'));
+            self.all_notes.retain(|e| !e.display.starts_with('.'));
         }
         self.apply_filter();
         self.clamp_selection();
@@ -444,20 +452,17 @@ impl App {
         if !self.config.ui.icons {
             return "";
         }
-        let ext = path
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("");
+        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
         match ext.to_lowercase().as_str() {
-            "md" | "markdown" => "\u{f48a} ",   // md
-            "rs" => "\u{e79b} ",                 // rust
-            "toml" | "yaml" | "yml" => "\u{f718} ", // config
-            "json" => "\u{e60b} ",               // json
-            "txt" => "\u{f15c} ",                // text
-            "pdf" => "\u{f1c1} ",                // pdf
+            "md" | "markdown" => "\u{f48a} ",                      // md
+            "rs" => "\u{e79b} ",                                   // rust
+            "toml" | "yaml" | "yml" => "\u{f718} ",                // config
+            "json" => "\u{e60b} ",                                 // json
+            "txt" => "\u{f15c} ",                                  // text
+            "pdf" => "\u{f1c1} ",                                  // pdf
             "png" | "jpg" | "jpeg" | "gif" | "svg" => "\u{f1c5} ", // image
-            _ if path.is_dir() => "\u{f115} ",   // folder
-            _ => "\u{f016} ",                    // file
+            _ if path.is_dir() => "\u{f115} ",                     // folder
+            _ => "\u{f016} ",                                      // file
         }
     }
 
@@ -592,7 +597,9 @@ impl App {
     }
 
     pub fn get_selected_path(&self) -> Option<PathBuf> {
-        self.filtered_notes.get(self.selected).map(|n| n.path.clone())
+        self.filtered_notes
+            .get(self.selected)
+            .map(|n| n.path.clone())
     }
 
     /// Get preview content: from textarea when editing, else from selected note.
@@ -661,9 +668,17 @@ impl App {
     }
 
     /// Load file and optionally move cursor to the given 0-based line.
-    pub fn load_file_into_editor_at_line(&mut self, path: PathBuf, goto_line: Option<usize>) -> Result<()> {
+    pub fn load_file_into_editor_at_line(
+        &mut self,
+        path: PathBuf,
+        goto_line: Option<usize>,
+    ) -> Result<()> {
         // Check if already open
-        if let Some(idx) = self.buffers.iter().position(|b| b.path.as_ref() == Some(&path)) {
+        if let Some(idx) = self
+            .buffers
+            .iter()
+            .position(|b| b.path.as_ref() == Some(&path))
+        {
             self.active_tab = idx;
             self.focus = Focus::Editor;
             self.editor_mode = EditorMode::Normal;
@@ -704,25 +719,43 @@ impl App {
         self.focus = Focus::List;
     }
 
-    /// Delete the selected note file or directory. If it was open in the editor, clears buffers.
-    pub fn delete_selected_note(&mut self) -> Result<()> {
+    /// Enter delete confirmation. Shows N/y prompt.
+    pub fn enter_delete_confirm(&mut self) {
         let entry = match self.filtered_notes.get(self.selected) {
+            Some(e) => e.clone(),
+            None => return,
+        };
+        if !entry.is_directory
+            && (entry.path.ends_with("config.toml") || entry.path.ends_with("theme.toml"))
+        {
+            self.message = Some("Cannot delete config files".to_string());
+            return;
+        }
+        self.delete_pending = Some(entry);
+        self.focus = Focus::DeleteConfirm;
+    }
+
+    /// Cancel delete confirmation.
+    pub fn exit_delete_confirm(&mut self) {
+        self.delete_pending = None;
+        self.focus = Focus::List;
+    }
+
+    /// Perform delete after user confirmed with y.
+    pub fn confirm_delete(&mut self) -> Result<()> {
+        let entry = match self.delete_pending.take() {
             Some(e) => e,
             None => return Ok(()),
         };
         let path = entry.path.clone();
         let is_directory = entry.is_directory;
-
-        if !is_directory && (path.ends_with("config.toml") || path.ends_with("theme.toml")) {
-            self.message = Some("Cannot delete config files".to_string());
-            return Ok(());
-        }
+        self.focus = Focus::List;
 
         if is_directory {
             self.buffers.retain(|b| {
-                b.path.as_ref().map_or(true, |p| {
-                    p.strip_prefix(&path).is_err()
-                })
+                b.path
+                    .as_ref()
+                    .is_none_or(|p| p.strip_prefix(&path).is_err())
             });
         } else {
             self.buffers.retain(|b| b.path.as_ref() != Some(&path));
@@ -730,7 +763,11 @@ impl App {
         if self.active_tab >= self.buffers.len() {
             self.active_tab = self.buffers.len().saturating_sub(1);
         }
-        if self.split_right_tab.map(|i| i >= self.buffers.len()).unwrap_or(false) {
+        if self
+            .split_right_tab
+            .map(|i| i >= self.buffers.len())
+            .unwrap_or(false)
+        {
             self.split_right_tab = None;
         }
         if is_directory {
@@ -740,7 +777,8 @@ impl App {
         }
         self.refresh_notes()?;
         if self.buffers.is_empty() {
-            self.buffers.push(EditorBuffer::new(None, vec![String::new()]));
+            self.buffers
+                .push(EditorBuffer::new(None, vec![String::new()]));
             self.active_tab = 0;
             self.focus = Focus::List;
             self.apply_editor_theme_to_all();
@@ -817,8 +855,7 @@ impl App {
         textarea.set_style(editor_style);
         textarea.set_cursor_style(theme.editor_cursor_style);
         textarea.set_cursor_line_style(
-            ratatui::style::Style::default()
-                .add_modifier(ratatui::style::Modifier::UNDERLINED),
+            ratatui::style::Style::default().add_modifier(ratatui::style::Modifier::UNDERLINED),
         );
         if editor_config.line_numbers {
             textarea.set_line_number_style(theme.editor_line_number_style);
@@ -828,9 +865,8 @@ impl App {
         let tab_len = editor_config.tab_width.clamp(1, 16);
         textarea.set_tab_length(tab_len);
         // Headers (# ), list markers (- ), unchecked (- [ ]), checked (- [x]), code blocks (```)
-        let _ = textarea.set_search_pattern(
-            r"(^#{1,6} )|(^[-*] )|(^[-*] \[ \])|(^[-*] \[[xX]\])|(^```)",
-        );
+        let _ = textarea
+            .set_search_pattern(r"(^#{1,6} )|(^[-*] )|(^[-*] \[ \])|(^[-*] \[[xX]\])|(^```)");
         textarea.set_search_style(
             theme
                 .editor_header_style
@@ -902,7 +938,9 @@ impl App {
             self.editor_mode = EditorMode::Insert;
             return true;
         }
-        let Some(buf) = self.focused_buffer_mut() else { return false };
+        let Some(buf) = self.focused_buffer_mut() else {
+            return false;
+        };
         match key.code {
             KeyCode::Char('u') => {
                 buf.textarea.undo();
@@ -952,18 +990,28 @@ impl App {
     pub fn telescope_backspace(&mut self) {
         self.telescope_query.pop();
         self.apply_telescope_filter();
-        self.telescope_selected = self.telescope_selected.saturating_sub(1).min(
-            self.telescope_filtered.len().saturating_sub(1),
-        );
+        self.telescope_selected = self
+            .telescope_selected
+            .saturating_sub(1)
+            .min(self.telescope_filtered.len().saturating_sub(1));
     }
 
     fn apply_telescope_filter(&mut self) {
-        self.telescope_filtered =
-            filter_telescope_notes(&self.telescope_notes, &self.telescope_query, &mut self.telescope_matcher);
+        self.telescope_filtered = filter_telescope_notes(
+            &self.telescope_notes,
+            &self.telescope_query,
+            &mut self.telescope_matcher,
+        );
         self.telescope_match_indices = self
             .telescope_filtered
             .iter()
-            .map(|n| get_telescope_match_indices(&n.display, &self.telescope_query, &mut self.telescope_matcher))
+            .map(|n| {
+                get_telescope_match_indices(
+                    &n.display,
+                    &self.telescope_query,
+                    &mut self.telescope_matcher,
+                )
+            })
             .collect();
         if self.telescope_selected >= self.telescope_filtered.len() {
             self.telescope_selected = self.telescope_filtered.len().saturating_sub(1);
@@ -1021,9 +1069,8 @@ impl App {
             .filter(|a| a.label().to_lowercase().contains(&q))
             .copied()
             .collect();
-        self.command_palette_selected = 0.min(
-            self.command_palette_filtered.len().saturating_sub(1),
-        );
+        self.command_palette_selected =
+            0.min(self.command_palette_filtered.len().saturating_sub(1));
     }
 
     pub fn command_palette_move_up(&mut self) {
@@ -1039,7 +1086,9 @@ impl App {
     }
 
     pub fn get_command_palette_action(&self) -> Option<CommandAction> {
-        self.command_palette_filtered.get(self.command_palette_selected).copied()
+        self.command_palette_filtered
+            .get(self.command_palette_selected)
+            .copied()
     }
 
     // Rename popup (r)
@@ -1081,9 +1130,7 @@ impl App {
             self.message = Some("Name cannot be empty".to_string());
             return Ok(());
         }
-        let name = if is_dir {
-            name.to_string()
-        } else if name.ends_with(".md") {
+        let name = if is_dir || name.ends_with(".md") {
             name.to_string()
         } else {
             format!("{}.md", name)
@@ -1094,7 +1141,10 @@ impl App {
             self.message = Some("File already exists".to_string());
             return Ok(());
         }
-        let was_editing = self.buffers.iter().any(|b| b.path.as_ref() == Some(&old_path));
+        let was_editing = self
+            .buffers
+            .iter()
+            .any(|b| b.path.as_ref() == Some(&old_path));
         fs::rename(&old_path, &new_path)?;
         self.refresh_notes()?;
         if was_editing {
@@ -1135,8 +1185,7 @@ impl App {
             self.message = Some("Directory already exists".to_string());
             return Ok(());
         }
-        fs::create_dir(&path)
-            .map_err(|e| anyhow::anyhow!("Failed to create directory: {}", e))?;
+        fs::create_dir(&path).map_err(|e| anyhow::anyhow!("Failed to create directory: {}", e))?;
         self.exit_create_directory();
         self.refresh_notes()?;
         self.message = Some(format!("Created directory: {}", name));
@@ -1224,7 +1273,8 @@ impl App {
         } else {
             format!("{}.md", link)
         };
-        let path = self.editing_path()
+        let path = self
+            .editing_path()
             .as_ref()
             .and_then(|p| p.parent())
             .unwrap_or(&self.current_dir)
@@ -1248,10 +1298,15 @@ impl App {
         self.backlinks.clear();
         self.backlinks_selected = 0;
         let current_file_name = match self.editing_path() {
-            Some(p) => p.file_stem().and_then(|s| s.to_str()).map(|s| s.to_string()),
+            Some(p) => p
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .map(|s| s.to_string()),
             None => return,
         };
-        let Some(target_name) = current_file_name else { return };
+        let Some(target_name) = current_file_name else {
+            return;
+        };
         let pattern = format!("[[{}]]", target_name);
         let current_path = self.editing_path();
 
@@ -1261,7 +1316,7 @@ impl App {
             .filter_map(|e| e.ok())
         {
             let path = entry.path();
-            if !path.is_file() || path.extension().map_or(true, |e| e != "md") {
+            if !path.is_file() || path.extension().is_none_or(|e| e != "md") {
                 continue;
             }
             if current_path.as_ref() == Some(&path.to_path_buf()) {
@@ -1319,7 +1374,7 @@ impl App {
             .filter_map(|e| e.ok())
         {
             let path = entry.path();
-            if !path.is_file() || path.extension().map_or(true, |e| e != "md") {
+            if !path.is_file() || path.extension().is_none_or(|e| e != "md") {
                 continue;
             }
             if let Ok(content) = fs::read_to_string(path) {
@@ -1374,7 +1429,7 @@ impl App {
                 .filter_map(|e| e.ok())
             {
                 let path = entry.path();
-                if !path.is_file() || path.extension().map_or(true, |e| e != "md") {
+                if !path.is_file() || path.extension().is_none_or(|e| e != "md") {
                     continue;
                 }
                 if let Ok(content) = fs::read_to_string(path) {
@@ -1419,14 +1474,18 @@ impl App {
             .filter_map(|e| e.ok())
         {
             let path = entry.path();
-            if !path.is_file() || path.extension().map_or(true, |e| e != "md") {
+            if !path.is_file() || path.extension().is_none_or(|e| e != "md") {
                 continue;
             }
             let path_buf = path.to_path_buf();
             if let Ok(content) = fs::read_to_string(path) {
                 for (zero_based_line, line) in content.lines().enumerate() {
                     if line.trim_start().starts_with("- [ ]") {
-                        let content = line.trim_start().trim_start_matches("- [ ]").trim().to_string();
+                        let content = line
+                            .trim_start()
+                            .trim_start_matches("- [ ]")
+                            .trim()
+                            .to_string();
                         self.tasks.push(TaskEntry {
                             path: path_buf.clone(),
                             line_number: zero_based_line,
@@ -1498,7 +1557,11 @@ impl App {
         Ok(path)
     }
 
-    fn create_note_from_filename(&mut self, name: &str, template: Template) -> Result<Option<PathBuf>> {
+    fn create_note_from_filename(
+        &mut self,
+        name: &str,
+        template: Template,
+    ) -> Result<Option<PathBuf>> {
         let name = name.trim();
         if name.is_empty() {
             return Ok(None);
@@ -1583,7 +1646,7 @@ impl App {
     pub fn export_to_pdf(&mut self) -> Result<()> {
         let buf = self.focused_buffer();
         let path = match buf.and_then(|b| b.path.as_ref()) {
-            Some(p) if p.extension().map_or(false, |e| e == "md") => p.clone(),
+            Some(p) if p.extension().is_some_and(|e| e == "md") => p.clone(),
             _ => {
                 self.message = Some("No Markdown file open".to_string());
                 return Ok(());
@@ -1639,7 +1702,11 @@ impl App {
         if self.active_tab >= self.buffers.len() {
             self.active_tab = self.buffers.len() - 1;
         }
-        if self.split_right_tab.map(|i| i >= self.buffers.len()).unwrap_or(false) {
+        if self
+            .split_right_tab
+            .map(|i| i >= self.buffers.len())
+            .unwrap_or(false)
+        {
             self.split_right_tab = None;
             self.editor_layout = EditorLayout::Single;
         }
@@ -1652,7 +1719,13 @@ fn load_entries(dir: &PathBuf) -> Result<Vec<NoteEntry>> {
 
     let entries = match fs::read_dir(dir) {
         Ok(e) => e,
-        Err(e) => return Err(anyhow::anyhow!("Cannot read directory {}: {}", dir.display(), e)),
+        Err(e) => {
+            return Err(anyhow::anyhow!(
+                "Cannot read directory {}: {}",
+                dir.display(),
+                e
+            ))
+        }
     };
 
     for entry in entries {
@@ -1674,22 +1747,20 @@ fn load_entries(dir: &PathBuf) -> Result<Vec<NoteEntry>> {
                 .unwrap_or("")
                 .to_string();
             dirs.push(NoteEntry::dir(path, format!("{}/", display)));
-        } else if meta.is_file() {
-            if path.extension().map_or(false, |e| e == "md") {
-                let display = path
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("")
-                    .to_string();
-                let (content, searchable) = read_note_content(&path, &display);
-                files.push(NoteEntry {
-                    path,
-                    display,
-                    content,
-                    searchable,
-                    is_directory: false,
-                });
-            }
+        } else if meta.is_file() && path.extension().is_some_and(|e| e == "md") {
+            let display = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("")
+                .to_string();
+            let (content, searchable) = read_note_content(&path, &display);
+            files.push(NoteEntry {
+                path,
+                display,
+                content,
+                searchable,
+                is_directory: false,
+            });
         }
     }
 

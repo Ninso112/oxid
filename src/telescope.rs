@@ -24,11 +24,7 @@ pub fn find_md_files_recursive(dir: &Path) -> Vec<NoteEntry> {
         if path.is_file() {
             if let Some(ext) = path.extension() {
                 if ext == "md" {
-                    let display = path
-                        .strip_prefix(dir)
-                        .unwrap_or(path)
-                        .display()
-                        .to_string();
+                    let display = path.strip_prefix(dir).unwrap_or(path).display().to_string();
                     let (content, searchable) = read_note_content(path, &display);
                     notes.push(NoteEntry::new(
                         path.to_path_buf(),
@@ -89,15 +85,14 @@ pub fn filter_telescope_notes(
 
     let pattern = Pattern::parse(query, CaseMatching::Ignore, Normalization::Smart);
     let matches = pattern.match_list(notes, matcher);
-    matches.into_iter().map(|(entry, _)| entry.clone()).collect()
+    matches
+        .into_iter()
+        .map(|(entry, _)| entry.clone())
+        .collect()
 }
 
 /// Get match indices for telescope list highlighting.
-pub fn get_telescope_match_indices(
-    display: &str,
-    query: &str,
-    matcher: &mut Matcher,
-) -> Vec<u32> {
+pub fn get_telescope_match_indices(display: &str, query: &str, matcher: &mut Matcher) -> Vec<u32> {
     if query.is_empty() || query.starts_with('#') || display.is_empty() {
         return Vec::new();
     }

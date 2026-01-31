@@ -25,7 +25,10 @@ pub fn parse_tags(content: &str) -> HashSet<String> {
         if let Some(cap) = tags_re.captures(frontmatter) {
             if let Some(m) = cap.get(1) {
                 for tag in m.as_str().split(',') {
-                    let t = tag.trim().trim_matches(|c| c == '"' || c == '\'').to_string();
+                    let t = tag
+                        .trim()
+                        .trim_matches(|c| c == '"' || c == '\'')
+                        .to_string();
                     if !t.is_empty() {
                         tags.insert(t);
                     }
@@ -39,7 +42,10 @@ pub fn parse_tags(content: &str) -> HashSet<String> {
         if let Some(cap) = tags_line_re.captures(frontmatter) {
             if let Some(m) = cap.get(1) {
                 for tag in m.as_str().split(|c: char| c.is_whitespace() || c == ',') {
-                    let t = tag.trim().trim_matches(|c| c == '"' || c == '\'').to_string();
+                    let t = tag
+                        .trim()
+                        .trim_matches(|c| c == '"' || c == '\'')
+                        .to_string();
                     if !t.is_empty() {
                         tags.insert(t);
                     }
