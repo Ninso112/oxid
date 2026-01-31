@@ -159,7 +159,7 @@ impl CommandAction {
     pub fn label(&self) -> &'static str {
         match self {
             CommandAction::RenameFile => "Rename File",
-            CommandAction::DeleteFile => "Delete File",
+            CommandAction::DeleteFile => "Delete",
             CommandAction::InsertDate => "Insert Date",
             CommandAction::ToggleZenMode => "Toggle Zen Mode",
             CommandAction::ToggleSplitView => "Toggle Split View",
@@ -704,31 +704,40 @@ impl App {
         self.focus = Focus::List;
     }
 
-    /// Delete the selected note file. If it was open in the editor, clears buffers.
+    /// Delete the selected note file or directory. If it was open in the editor, clears buffers.
     pub fn delete_selected_note(&mut self) -> Result<()> {
         let entry = match self.filtered_notes.get(self.selected) {
             Some(e) => e,
             None => return Ok(()),
         };
-        if entry.is_directory {
-            self.message = Some("Use a file manager to delete directories".to_string());
-            return Ok(());
-        }
         let path = entry.path.clone();
+        let is_directory = entry.is_directory;
 
-        if path.ends_with("config.toml") || path.ends_with("theme.toml") {
+        if !is_directory && (path.ends_with("config.toml") || path.ends_with("theme.toml")) {
             self.message = Some("Cannot delete config files".to_string());
             return Ok(());
         }
 
-        self.buffers.retain(|b| b.path.as_ref() != Some(&path));
+        if is_directory {
+            self.buffers.retain(|b| {
+                b.path.as_ref().map_or(true, |p| {
+                    p.strip_prefix(&path).is_err()
+                })
+            });
+        } else {
+            self.buffers.retain(|b| b.path.as_ref() != Some(&path));
+        }
         if self.active_tab >= self.buffers.len() {
             self.active_tab = self.buffers.len().saturating_sub(1);
         }
         if self.split_right_tab.map(|i| i >= self.buffers.len()).unwrap_or(false) {
             self.split_right_tab = None;
         }
-        fs::remove_file(&path)?;
+        if is_directory {
+            fs::remove_dir_all(&path)?;
+        } else {
+            fs::remove_file(&path)?;
+        }
         self.refresh_notes()?;
         if self.buffers.is_empty() {
             self.buffers.push(EditorBuffer::new(None, vec![String::new()]));
