@@ -64,6 +64,16 @@ pub struct Theme {
     pub editor_checkbox: ColorDef,
     #[serde(rename = "editor_checkbox_checked")]
     pub editor_checkbox_checked: ColorDef,
+    #[serde(rename = "list_directory")]
+    pub list_directory: ColorDef,
+    #[serde(rename = "editor_code_block")]
+    pub editor_code_block: ColorDef,
+    #[serde(rename = "editor_code_keyword")]
+    pub editor_code_keyword: ColorDef,
+    #[serde(rename = "statusbar_bg")]
+    pub statusbar_bg: ColorDef,
+    #[serde(rename = "statusbar_fg")]
+    pub statusbar_fg: ColorDef,
 }
 
 impl Default for Theme {
@@ -95,19 +105,64 @@ impl Default for Theme {
             editor_list: def("yellow"),
             editor_checkbox: def("yellow"),
             editor_checkbox_checked: def("green"),
+            list_directory: def("blue"),
+            editor_code_block: def("cyan"),
+            editor_code_keyword: def("magenta"),
+            statusbar_bg: def("black"),
+            statusbar_fg: def("white"),
         }
     }
 }
 
-/// Color definition supporting hex (#RRGGBB) or named colors.
+/// Color definition supporting hex (#RRGGBB, #RGB) or named colors.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(transparent)]
 pub struct ColorDef(String);
 
+/// Parse a color string: hex (#rrggbb or #rgb) or named color.
+pub fn parse_color_str(s: &str) -> Result<Color> {
+    let s = s.trim();
+    if s.starts_with('#') {
+        return parse_hex_color(s);
+    }
+    let normalized = match s.to_lowercase().as_str() {
+        "orange1" | "orange" => "yellow",
+        "orange2" | "dark_orange" => "dark_gray",
+        _ => s,
+    };
+    Color::from_str(normalized).with_context(|| format!("Invalid color: {}", s))
+}
+
+fn parse_hex_color(s: &str) -> Result<Color> {
+    let s = s.trim_start_matches('#').trim();
+    let (r, g, b) = if s.len() == 6 {
+        let r = u8::from_str_radix(&s[0..2], 16)
+            .with_context(|| format!("Invalid hex color: {}", s))?;
+        let g = u8::from_str_radix(&s[2..4], 16)
+            .with_context(|| format!("Invalid hex color: {}", s))?;
+        let b = u8::from_str_radix(&s[4..6], 16)
+            .with_context(|| format!("Invalid hex color: {}", s))?;
+        (r, g, b)
+    } else if s.len() == 3 {
+        let r = u8::from_str_radix(&s[0..1].repeat(2), 16)
+            .with_context(|| format!("Invalid hex color: {}", s))?;
+        let g = u8::from_str_radix(&s[1..2].repeat(2), 16)
+            .with_context(|| format!("Invalid hex color: {}", s))?;
+        let b = u8::from_str_radix(&s[2..3].repeat(2), 16)
+            .with_context(|| format!("Invalid hex color: {}", s))?;
+        (r, g, b)
+    } else {
+        anyhow::bail!("Hex color must be #RRGGBB or #RGB, got: {}", s);
+    };
+    Ok(Color::Rgb(r, g, b))
+}
+
 impl ColorDef {
     pub fn to_ratatui_color(&self) -> Result<Color> {
         let s = self.0.trim();
-        // Map common invalid names to valid ratatui colors (ratatui has no "orange")
+        if s.starts_with('#') {
+            return parse_hex_color(s);
+        }
         let normalized = match s.to_lowercase().as_str() {
             "orange1" | "orange" => "yellow",
             "orange2" | "dark_orange" => "dark_gray",
@@ -185,6 +240,12 @@ editor_header = {}
 editor_list = {}
 editor_checkbox = {}
 editor_checkbox_checked = {}
+list_directory = {}
+editor_code_block = {}
+editor_code_keyword = {}
+# Status bar (footer)
+statusbar_bg = {}
+statusbar_fg = {}
 "#,
         cv(&theme.app_background),
         cv(&theme.border),
@@ -212,6 +273,11 @@ editor_checkbox_checked = {}
         cv(&theme.editor_list),
         cv(&theme.editor_checkbox),
         cv(&theme.editor_checkbox_checked),
+        cv(&theme.list_directory),
+        cv(&theme.editor_code_block),
+        cv(&theme.editor_code_keyword),
+        cv(&theme.statusbar_bg),
+        cv(&theme.statusbar_fg),
     )
 }
 
@@ -243,13 +309,49 @@ pub struct ResolvedTheme {
     pub editor_list_style: Style,
     pub editor_checkbox_style: Style,
     pub editor_checkbox_checked_style: Style,
+    pub list_directory_style: Style,
+    pub editor_code_block_style: Style,
+    pub editor_code_keyword_style: Style,
+    pub statusbar_bg_style: Style,
+    pub statusbar_fg_style: Style,
 }
 
 impl ResolvedTheme {
-    pub fn from_theme(theme: &Theme) -> Result<Self> {
+    /// Build resolved theme from theme.toml, optionally overriding with config.toml [theme].
+    pub fn resolve(theme: &Theme, config_theme: Option<&crate::config::ThemeConfig>) -> Result<Self> {
+        let bg = config_theme
+            .map(|c| parse_color_str(&c.background))
+            .transpose()?
+            .unwrap_or_else(|| theme.editor_bg.to_ratatui_color().unwrap());
+        let fg = config_theme
+            .map(|c| parse_color_str(&c.foreground))
+            .transpose()?
+            .unwrap_or_else(|| theme.editor_fg.to_ratatui_color().unwrap());
+        let cursor = config_theme
+            .map(|c| parse_color_str(&c.cursor))
+            .transpose()?
+            .unwrap_or_else(|| theme.editor_cursor.to_ratatui_color().unwrap());
+        let sel_fg = config_theme
+            .map(|c| parse_color_str(&c.selection))
+            .transpose()?
+            .unwrap_or_else(|| theme.list_text_selected_fg.to_ratatui_color().unwrap());
+        let sel_bg = theme.list_text_selected_bg.to_ratatui_color()?;
+        let statusbar_bg = config_theme
+            .map(|c| parse_color_str(&c.statusbar_bg))
+            .transpose()?
+            .unwrap_or_else(|| theme.statusbar_bg.to_ratatui_color().unwrap());
+        let statusbar_fg = config_theme
+            .map(|c| parse_color_str(&c.statusbar_fg))
+            .transpose()?
+            .unwrap_or_else(|| theme.statusbar_fg.to_ratatui_color().unwrap());
+        let border = config_theme
+            .map(|c| parse_color_str(&c.border_color))
+            .transpose()?
+            .unwrap_or_else(|| theme.border.to_ratatui_color().unwrap());
+
         Ok(Self {
-            app_background_style: Style::default().bg(theme.app_background.to_ratatui_color()?),
-            border_style: Style::default().fg(theme.border.to_ratatui_color()?),
+            app_background_style: Style::default().bg(bg),
+            border_style: Style::default().fg(border),
             header_style: Style::default()
                 .fg(theme.header.to_ratatui_color()?)
                 .add_modifier(Modifier::BOLD),
@@ -260,8 +362,8 @@ impl ResolvedTheme {
             list_border_inactive_style: Style::default()
                 .fg(theme.list_border_inactive.to_ratatui_color()?),
             list_text_selected_style: Style::default()
-                .fg(theme.list_text_selected_fg.to_ratatui_color()?)
-                .bg(theme.list_text_selected_bg.to_ratatui_color()?)
+                .fg(sel_fg)
+                .bg(sel_bg)
                 .add_modifier(Modifier::BOLD),
             list_text_normal_style: Style::default()
                 .fg(theme.list_text_normal.to_ratatui_color()?),
@@ -274,10 +376,10 @@ impl ResolvedTheme {
                 .fg(theme.search_match.to_ratatui_color()?)
                 .add_modifier(Modifier::BOLD),
             help_text_style: Style::default().fg(theme.help_text.to_ratatui_color()?),
-            editor_bg_style: Style::default().bg(theme.editor_bg.to_ratatui_color()?),
-            editor_fg_style: Style::default().fg(theme.editor_fg.to_ratatui_color()?),
+            editor_bg_style: Style::default().bg(bg),
+            editor_fg_style: Style::default().fg(fg),
             editor_cursor_style: Style::default()
-                .fg(theme.editor_cursor.to_ratatui_color()?)
+                .fg(cursor)
                 .add_modifier(Modifier::REVERSED),
             editor_line_number_style: Style::default()
                 .fg(theme.editor_line_number.to_ratatui_color()?),
@@ -297,6 +399,19 @@ impl ResolvedTheme {
             editor_checkbox_checked_style: Style::default()
                 .fg(theme.editor_checkbox_checked.to_ratatui_color()?)
                 .add_modifier(Modifier::CROSSED_OUT),
+            list_directory_style: Style::default()
+                .fg(theme.list_directory.to_ratatui_color()?),
+            editor_code_block_style: Style::default()
+                .fg(theme.editor_code_block.to_ratatui_color()?),
+            editor_code_keyword_style: Style::default()
+                .fg(theme.editor_code_keyword.to_ratatui_color()?)
+                .add_modifier(Modifier::BOLD),
+            statusbar_bg_style: Style::default().bg(statusbar_bg).fg(statusbar_fg),
+            statusbar_fg_style: Style::default().fg(statusbar_fg),
         })
+    }
+
+    pub fn from_theme(theme: &Theme) -> Result<Self> {
+        Self::resolve(theme, None)
     }
 }

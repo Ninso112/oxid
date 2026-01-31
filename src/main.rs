@@ -5,6 +5,7 @@ mod app;
 mod config;
 mod frontmatter;
 mod git;
+mod handlers;
 mod markdown;
 mod search;
 mod spellcheck;
@@ -14,16 +15,18 @@ mod theme;
 mod ui;
 
 use anyhow::Result;
-use app::{App, CommandAction, EditorLayout, EditorMode, Focus, Mode};
+use app::{App, CommandAction, EditorLayout, EditorMode, Focus, Mode, TagExplorerView};
+use handlers::key_matches;
 use clap::Parser;
 use crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, KeyModifiers},
+    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyEventKind},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 use std::io;
+use std::time::Duration;
 use tui_textarea::Input;
 
 #[derive(Parser, Debug)]
@@ -37,202 +40,288 @@ fn run_app(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     app: &mut App,
 ) -> Result<()> {
+    let poll_timeout = Duration::from_millis(500);
+
     loop {
         terminal.draw(|f| ui::draw(f, app))?;
+        app.tick_save_indicator();
 
-        if let Event::Key(key) = event::read()? {
-            if key.kind != KeyEventKind::Press {
+        if !event::poll(poll_timeout)? {
+            if app.check_auto_save()? {
                 continue;
             }
+            continue;
+        }
 
-            let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
-            let alt = key.modifiers.contains(KeyModifiers::ALT);
+        let Ok(Event::Key(key)) = event::read() else { continue };
+        if key.kind != KeyEventKind::Press {
+            continue;
+        }
 
-            // Global: F11 Zen Mode
-            if key.code == KeyCode::F(11) {
+        let k = &app.resolved_keys;
+
+            // Global
+            if key_matches(key, &[k.zen_mode]) {
                 app.toggle_zen_mode();
                 continue;
             }
-
-            // Global: / Telescope search (config.keys.search)
-            if key.code == KeyCode::Char('/') && !ctrl && !alt
-                && app.config.keys.search == "/"
-            {
+            if key_matches(key, &[k.search]) {
                 app.enter_telescope();
                 continue;
             }
-
-            // Global: Ctrl+p Command Palette
-            if key.code == KeyCode::Char('p') && ctrl {
+            if key_matches(key, &[k.command_palette]) {
                 app.enter_command_palette();
+                continue;
+            }
+            if key_matches(key, &[k.daily_note]) {
+                let _ = app.open_daily_note();
+                continue;
+            }
+            if key_matches(key, &[k.task_board]) {
+                app.enter_task_view();
                 continue;
             }
 
             // Focus-specific handling
             match app.focus {
                 Focus::Search => {
-                    match key.code {
-                        KeyCode::Esc => app.exit_telescope(),
-                        KeyCode::Enter => {
-                            if let Some(path) = app.get_telescope_selected_path() {
-                                let _ = app.load_file_into_editor(path);
-                                app.exit_telescope();
-                            }
+                    if key_matches(key, &[k.escape]) {
+                        app.exit_telescope();
+                    } else if key_matches(key, &[k.enter]) {
+                        if let Some(path) = app.get_telescope_selected_path() {
+                            let _ = app.load_file_into_editor(path);
+                            app.exit_telescope();
                         }
-                        KeyCode::Backspace => app.telescope_backspace(),
-                        KeyCode::Up | KeyCode::Char('k') => app.telescope_move_up(),
-                        KeyCode::Down | KeyCode::Char('j') => app.telescope_move_down(),
-                        KeyCode::Char(c) => app.telescope_add_char(c),
-                        _ => {}
+                    } else if key_matches(key, &[k.backspace]) {
+                        app.telescope_backspace();
+                    } else if key_matches(key, &[k.move_up, k.move_up_alt]) {
+                        app.telescope_move_up();
+                    } else if key_matches(key, &[k.move_down, k.move_down_alt]) {
+                        app.telescope_move_down();
+                    } else if let crossterm::event::KeyCode::Char(c) = key.code {
+                        app.telescope_add_char(c);
                     }
                 }
                 Focus::CommandPalette => {
-                    match key.code {
-                        KeyCode::Esc => app.exit_command_palette(),
-                        KeyCode::Enter => {
-                            if let Some(action) = app.get_command_palette_action() {
-                                match action {
-                                    CommandAction::RenameFile => {
-                                        app.exit_command_palette();
-                                        app.focus = Focus::List;
-                                        app.enter_rename();
-                                    }
-                                    CommandAction::DeleteFile => {
-                                        app.exit_command_palette();
-                                        app.focus = Focus::List;
-                                        let _ = app.delete_selected_note();
-                                    }
-                                    CommandAction::InsertDate => {
-                                        app.exit_command_palette();
-                                        app.focus = Focus::Editor;
-                                        app.insert_date_at_cursor();
-                                    }
-                                    CommandAction::ToggleZenMode => {
-                                        app.toggle_zen_mode();
-                                        app.exit_command_palette();
-                                    }
-                                    CommandAction::ToggleSplitView => {
-                                        app.toggle_split_view();
-                                        app.exit_command_palette();
-                                    }
-                                    CommandAction::ExportPdf => {
-                                        let _ = app.export_to_pdf();
-                                        app.exit_command_palette();
-                                    }
-                                    CommandAction::GitPush => {
-                                        let _ = app.git_push();
-                                        app.exit_command_palette();
-                                    }
+                    if key_matches(key, &[k.escape]) {
+                        app.exit_command_palette();
+                    } else if key_matches(key, &[k.enter]) {
+                        if let Some(action) = app.get_command_palette_action() {
+                            match action {
+                                CommandAction::RenameFile => {
+                                    app.exit_command_palette();
+                                    app.focus = Focus::List;
+                                    app.enter_rename();
+                                }
+                                CommandAction::DeleteFile => {
+                                    app.exit_command_palette();
+                                    app.focus = Focus::List;
+                                    let _ = app.delete_selected_note();
+                                }
+                                CommandAction::InsertDate => {
+                                    app.exit_command_palette();
+                                    app.focus = Focus::Editor;
+                                    app.mark_editor_dirty();
+                                    app.insert_date_at_cursor();
+                                }
+                                CommandAction::ToggleZenMode => {
+                                    app.toggle_zen_mode();
+                                    app.exit_command_palette();
+                                }
+                                CommandAction::ToggleSplitView => {
+                                    app.toggle_split_view();
+                                    app.exit_command_palette();
+                                }
+                                CommandAction::ExportPdf => {
+                                    let _ = app.export_to_pdf();
+                                    app.exit_command_palette();
+                                }
+                                CommandAction::GitPush => {
+                                    let _ = app.git_push();
+                                    app.exit_command_palette();
                                 }
                             }
                         }
-                        KeyCode::Backspace => app.command_palette_backspace(),
-                        KeyCode::Up | KeyCode::Char('k') => app.command_palette_move_up(),
-                        KeyCode::Down | KeyCode::Char('j') => app.command_palette_move_down(),
-                        KeyCode::Char(c) => app.command_palette_add_char(c),
-                        _ => {}
+                    } else if key_matches(key, &[k.backspace]) {
+                        app.command_palette_backspace();
+                    } else if key_matches(key, &[k.move_up, k.move_up_alt]) {
+                        app.command_palette_move_up();
+                    } else if key_matches(key, &[k.move_down, k.move_down_alt]) {
+                        app.command_palette_move_down();
+                    } else if let crossterm::event::KeyCode::Char(c) = key.code {
+                        app.command_palette_add_char(c);
                     }
                 }
                 Focus::Rename => {
-                    match key.code {
-                        KeyCode::Esc => app.exit_rename(),
-                        KeyCode::Enter => {
-                            let _ = app.rename_selected_note();
+                    if key_matches(key, &[k.escape]) {
+                        app.exit_rename();
+                    } else if key_matches(key, &[k.enter]) {
+                        let _ = app.rename_selected_note();
+                    } else if key_matches(key, &[k.backspace]) {
+                        app.rename_backspace();
+                    } else if let crossterm::event::KeyCode::Char(c) = key.code {
+                        app.rename_add_char(c);
+                    }
+                }
+                Focus::Backlinks => {
+                    if key_matches(key, &[k.escape]) {
+                        app.focus = Focus::Editor;
+                    } else if key_matches(key, &[k.move_up, k.move_up_alt]) {
+                        app.backlinks_move_up();
+                    } else if key_matches(key, &[k.move_down, k.move_down_alt]) {
+                        app.backlinks_move_down();
+                    } else if key_matches(key, &[k.enter]) {
+                        let _ = app.open_selected_backlink();
+                    }
+                }
+                Focus::CreatingDirectory => {
+                    if key_matches(key, &[k.escape]) {
+                        app.exit_create_directory();
+                    } else if key_matches(key, &[k.enter]) {
+                        let _ = app.create_directory();
+                    } else if key_matches(key, &[k.backspace]) {
+                        app.directory_backspace();
+                    } else if let crossterm::event::KeyCode::Char(c) = key.code {
+                        app.directory_add_char(c);
+                    }
+                }
+                Focus::TaskView => {
+                    if key_matches(key, &[k.escape]) {
+                        app.exit_task_view();
+                    } else if key_matches(key, &[k.move_up, k.move_up_alt]) {
+                        app.task_move_up();
+                    } else if key_matches(key, &[k.move_down, k.move_down_alt]) {
+                        app.task_move_down();
+                    } else if key_matches(key, &[k.enter]) {
+                        let _ = app.open_selected_task();
+                    }
+                }
+                Focus::TagExplorer => {
+                    if key_matches(key, &[k.escape]) {
+                        app.exit_tag_explorer();
+                    } else if key_matches(key, &[k.move_up, k.move_up_alt]) {
+                        if app.tag_explorer_view == TagExplorerView::TagList {
+                            app.tag_list_move_up();
+                        } else {
+                            app.tag_file_move_up();
                         }
-                        KeyCode::Backspace => app.rename_backspace(),
-                        KeyCode::Char(c) => app.rename_add_char(c),
-                        _ => {}
+                    } else if key_matches(key, &[k.move_down, k.move_down_alt]) {
+                        if app.tag_explorer_view == TagExplorerView::TagList {
+                            app.tag_list_move_down();
+                        } else {
+                            app.tag_file_move_down();
+                        }
+                    } else if key_matches(key, &[k.enter]) {
+                        if app.tag_explorer_view == TagExplorerView::TagList {
+                            app.load_files_for_selected_tag();
+                        } else {
+                            let _ = app.open_selected_tag_file();
+                        }
+                    } else if key_matches(key, &[k.backspace, k.move_left, k.move_left_alt]) {
+                        if app.tag_explorer_view == TagExplorerView::FileList {
+                            app.tag_explorer_view = TagExplorerView::TagList;
+                        }
                     }
                 }
                 Focus::List => {
                     if app.template_picker_active {
-                        match key.code {
-                            KeyCode::Esc => app.exit_template_picker(),
-                            KeyCode::Enter => {
-                                if let Some(path) = app.create_note_with_template(app.get_selected_template())? {
-                                    let _ = app.load_file_into_editor(path);
-                                }
+                        if key_matches(key, &[k.escape]) {
+                            app.exit_template_picker();
+                        } else if key_matches(key, &[k.enter]) {
+                            if let Some(path) = app.create_note_with_template(app.get_selected_template())? {
+                                let _ = app.load_file_into_editor(path);
                             }
-                            KeyCode::Up | KeyCode::Char('k') => app.template_picker_move_up(),
-                            KeyCode::Down | KeyCode::Char('j') => app.template_picker_move_down(),
-                            _ => {}
+                        } else if key_matches(key, &[k.move_up, k.move_up_alt]) {
+                            app.template_picker_move_up();
+                        } else if key_matches(key, &[k.move_down, k.move_down_alt]) {
+                            app.template_picker_move_down();
                         }
                     } else {
                         match app.mode {
                             Mode::Normal => {
-                                match key.code {
-                                    KeyCode::Char('q') => {
-                                        let _ = app.save_editor();
-                                        break;
+                                if key_matches(key, &[k.quit]) {
+                                    let _ = app.save_editor();
+                                    break;
+                                }
+                                if key_matches(key, &[k.move_up, k.move_up_alt]) {
+                                    app.move_selection_up();
+                                } else if key_matches(key, &[k.move_down, k.move_down_alt]) {
+                                    app.move_selection_down();
+                                } else if key_matches(key, &[k.search]) {
+                                    app.enter_search_mode();
+                                } else if key_matches(key, &[k.list_create_note]) {
+                                    app.enter_create_mode();
+                                } else if key_matches(key, &[k.list_create_dir]) {
+                                    app.enter_create_directory();
+                                } else if key_matches(key, &[k.list_tag_explorer]) {
+                                    app.enter_tag_explorer();
+                                } else if key_matches(key, &[k.list_rename]) {
+                                    app.enter_rename();
+                                } else if key_matches(key, &[k.list_edit_config]) {
+                                    if let Ok(config_path) = config::config_file_path() {
+                                        let _ = app.load_file_into_editor(config_path);
                                     }
-                                    KeyCode::Up | KeyCode::Char('k') => app.move_selection_up(),
-                                    KeyCode::Down | KeyCode::Char('j') => app.move_selection_down(),
-                                    KeyCode::Char('/') => app.enter_search_mode(),
-                                    KeyCode::Char('n') => app.enter_create_mode(),
-                                    KeyCode::Char('r') => app.enter_rename(),
-                                    KeyCode::Char('c') => {
-                                        if let Ok(config_path) = config::config_file_path() {
-                                            let _ = app.load_file_into_editor(config_path);
-                                        }
-                                    }
-                                    KeyCode::Char('d') | KeyCode::Delete => {
-                                        let _ = app.delete_selected_note();
-                                    }
-                                    KeyCode::Enter => {
+                                } else if key_matches(key, &[k.list_delete, k.delete]) {
+                                    let _ = app.delete_selected_note();
+                                } else if key_matches(key, &[k.list_parent, k.list_parent_alt, k.move_left, k.move_left_alt]) {
+                                    app.go_to_parent_dir();
+                                } else if key_matches(key, &[k.enter]) {
+                                    if !app.enter_selected_directory() {
                                         if let Some(path) = app.get_selected_path() {
                                             let _ = app.load_file_into_editor(path);
                                         }
                                     }
-                                    _ => {}
                                 }
                             }
                             Mode::Search => {
-                                match key.code {
-                                    KeyCode::Esc => app.exit_search_mode(),
-                                    KeyCode::Enter => {
-                                        if let Some(path) = app.get_selected_path() {
-                                            let _ = app.load_file_into_editor(path);
-                                            app.exit_search_mode();
-                                        }
+                                if key_matches(key, &[k.escape]) {
+                                    app.exit_search_mode();
+                                } else if key_matches(key, &[k.enter]) {
+                                    if app.enter_selected_directory() {
+                                        app.exit_search_mode();
+                                    } else if let Some(path) = app.get_selected_path() {
+                                        let _ = app.load_file_into_editor(path);
+                                        app.exit_search_mode();
                                     }
-                                    KeyCode::Backspace => app.search_backspace(),
-                                    KeyCode::Char(c) => app.search_add_char(c),
-                                    _ => {}
+                                } else if key_matches(key, &[k.backspace]) {
+                                    app.search_backspace();
+                                } else if let crossterm::event::KeyCode::Char(c) = key.code {
+                                    app.search_add_char(c);
                                 }
                             }
                             Mode::Create => {
-                                match key.code {
-                                    KeyCode::Esc => app.exit_create_mode(),
-                                    KeyCode::Enter => {
-                                        app.enter_template_picker();
-                                    }
-                                    KeyCode::Backspace => app.create_backspace(),
-                                    KeyCode::Char(c) => app.create_add_char(c),
-                                    _ => {}
+                                if key_matches(key, &[k.escape]) {
+                                    app.exit_create_mode();
+                                } else if key_matches(key, &[k.enter]) {
+                                    app.enter_template_picker();
+                                } else if key_matches(key, &[k.backspace]) {
+                                    app.create_backspace();
+                                } else if let crossterm::event::KeyCode::Char(c) = key.code {
+                                    app.create_add_char(c);
                                 }
                             }
                         }
                     }
                 }
                 Focus::Editor => {
-                    // Ctrl+e: PDF export
-                    if key.code == KeyCode::Char('e') && ctrl {
+                    if key_matches(key, &[k.editor_pdf]) {
                         let _ = app.export_to_pdf();
                         continue;
                     }
-                    // Split pane focus switch
+                    if key_matches(key, &[k.editor_backlinks]) && app.config.editor.show_backlinks {
+                        app.focus = Focus::Backlinks;
+                        continue;
+                    }
                     if app.editor_layout == EditorLayout::SplitVertical
                         && app.split_right_tab.is_some()
+                        && key_matches(key, &[k.editor_split_focus])
                     {
-                        if key.code == KeyCode::Tab {
-                            app.split_focus_left = !app.split_focus_left;
-                            continue;
-                        }
+                        app.split_focus_left = !app.split_focus_left;
+                        continue;
                     }
 
-                    // Enter in Normal mode: Wiki link navigation
-                    if key.code == KeyCode::Enter
-                        && app.editor_mode == EditorMode::Normal
+                    if app.editor_mode == EditorMode::Normal
+                        && (key_matches(key, &[k.enter]) || key_matches(key, &[k.editor_wiki_link]))
                     {
                         if let Some(link) = app.get_wiki_link_under_cursor() {
                             let _ = app.open_wiki_link(&link);
@@ -245,17 +334,19 @@ fn run_app(
                             app.editor_normal_input(key);
                         }
                         EditorMode::Insert => {
-                            if key.code == KeyCode::Esc {
+                            if key_matches(key, &[k.escape]) {
                                 app.editor_mode = EditorMode::Normal;
-                            } else if let Some(buf) = app.focused_buffer_mut() {
-                                let input: Input = key.into();
-                                buf.textarea.input_without_shortcuts(input);
+                            } else {
+                                app.mark_editor_dirty();
+                                if let Some(buf) = app.focused_buffer_mut() {
+                                    let input: Input = key.into();
+                                    buf.textarea.input_without_shortcuts(input);
+                                }
                             }
                         }
                     }
                 }
             }
-        }
     }
     Ok(())
 }
