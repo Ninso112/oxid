@@ -882,17 +882,19 @@ impl App {
             self.focus_list();
             return true;
         }
+        if key_matches(key, &[self.resolved_keys.editor_insert]) {
+            self.editor_mode = EditorMode::Insert;
+            return true;
+        }
+        if key_matches(key, &[self.resolved_keys.editor_append]) {
+            if let Some(buf) = self.focused_buffer_mut() {
+                buf.textarea.move_cursor(CursorMove::Forward);
+            }
+            self.editor_mode = EditorMode::Insert;
+            return true;
+        }
         let Some(buf) = self.focused_buffer_mut() else { return false };
         match key.code {
-            KeyCode::Char('i') => {
-                self.editor_mode = EditorMode::Insert;
-                return true;
-            }
-            KeyCode::Char('a') => {
-                buf.textarea.move_cursor(CursorMove::Forward);
-                self.editor_mode = EditorMode::Insert;
-                return true;
-            }
             KeyCode::Char('u') => {
                 buf.textarea.undo();
                 return true;

@@ -311,6 +311,7 @@ pub struct ResolvedTheme {
     pub editor_checkbox_checked_style: Style,
     pub list_directory_style: Style,
     pub editor_code_block_style: Style,
+    #[allow(dead_code)] // Reserved for future syntax highlighting
     pub editor_code_keyword_style: Style,
     pub statusbar_bg_style: Style,
     pub statusbar_fg_style: Style,
@@ -409,9 +410,5 @@ impl ResolvedTheme {
             statusbar_bg_style: Style::default().bg(statusbar_bg).fg(statusbar_fg),
             statusbar_fg_style: Style::default().fg(statusbar_fg),
         })
-    }
-
-    pub fn from_theme(theme: &Theme) -> Result<Self> {
-        Self::resolve(theme, None)
     }
 }
