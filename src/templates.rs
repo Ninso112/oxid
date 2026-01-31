@@ -25,9 +25,7 @@ impl Template {
         match self {
             Template::Empty => String::new(),
             Template::DailyNote => format!("# {}\n\n", Local::now().format("%Y-%m-%d")),
-            Template::Meeting => {
-                "## Participants\n\n\n## Notes\n\n".to_string()
-            }
+            Template::Meeting => "## Participants\n\n\n## Notes\n\n".to_string(),
         }
     }
 

@@ -21,68 +21,61 @@ pub fn render_markdown(content: &str, theme: &ResolvedTheme) -> Vec<Line<'static
 
     for event in parser {
         match event {
-            Event::Start(tag) => {
-                match tag {
-                    Tag::Heading(_, _, _) => {
-                        flush_line(&mut current_line, &mut lines);
-                        block_stack.push(BlockStyle::Heading);
-                    }
-                    Tag::CodeBlock(CodeBlockKind::Fenced(_) | CodeBlockKind::Indented) => {
-                        flush_line(&mut current_line, &mut lines);
-                        block_stack.push(BlockStyle::CodeBlock);
-                    }
-                    Tag::List(numbering) => {
-                        flush_line(&mut current_line, &mut lines);
-                        list_item_counter = numbering;
-                        block_stack.push(BlockStyle::List);
-                    }
-                    Tag::Item => {
-                        if !current_line.is_empty() {
-                            flush_line(&mut current_line, &mut lines);
-                        }
-                        task_list_checked = None;
-                        list_item_prefix = match list_item_counter {
-                            Some(n) => {
-                                let prefix = format!("{}. ", n);
-                                list_item_counter = Some(n + 1);
-                                prefix
-                            }
-                            None => "• ".to_string(),
-                        };
-                        block_stack.push(BlockStyle::ListItem);
-                    }
-                    Tag::Paragraph => {
-                        if !matches!(block_stack.last(), Some(BlockStyle::ListItem)) {
-                            flush_line(&mut current_line, &mut lines);
-                        }
-                        block_stack.push(BlockStyle::Paragraph);
-                    }
-                    Tag::Strong | Tag::Emphasis => {
-                        block_stack.push(BlockStyle::Bold);
-                    }
-                    _ => {}
+            Event::Start(tag) => match tag {
+                Tag::Heading(_, _, _) => {
+                    flush_line(&mut current_line, &mut lines);
+                    block_stack.push(BlockStyle::Heading);
                 }
-            }
-            Event::End(tag) => {
-                match tag {
-                    Tag::Heading(_, _, _)
-                    | Tag::CodeBlock(_)
-                    | Tag::List(_)
-                    | Tag::Paragraph => {
-                        flush_line(&mut current_line, &mut lines);
-                        let _ = block_stack.pop();
-                    }
-                    Tag::Item => {
-                        flush_line(&mut current_line, &mut lines);
-                        task_list_checked = None;
-                        let _ = block_stack.pop();
-                    }
-                    Tag::Strong | Tag::Emphasis => {
-                        let _ = block_stack.pop();
-                    }
-                    _ => {}
+                Tag::CodeBlock(CodeBlockKind::Fenced(_) | CodeBlockKind::Indented) => {
+                    flush_line(&mut current_line, &mut lines);
+                    block_stack.push(BlockStyle::CodeBlock);
                 }
-            }
+                Tag::List(numbering) => {
+                    flush_line(&mut current_line, &mut lines);
+                    list_item_counter = numbering;
+                    block_stack.push(BlockStyle::List);
+                }
+                Tag::Item => {
+                    if !current_line.is_empty() {
+                        flush_line(&mut current_line, &mut lines);
+                    }
+                    task_list_checked = None;
+                    list_item_prefix = match list_item_counter {
+                        Some(n) => {
+                            let prefix = format!("{}. ", n);
+                            list_item_counter = Some(n + 1);
+                            prefix
+                        }
+                        None => "• ".to_string(),
+                    };
+                    block_stack.push(BlockStyle::ListItem);
+                }
+                Tag::Paragraph => {
+                    if !matches!(block_stack.last(), Some(BlockStyle::ListItem)) {
+                        flush_line(&mut current_line, &mut lines);
+                    }
+                    block_stack.push(BlockStyle::Paragraph);
+                }
+                Tag::Strong | Tag::Emphasis => {
+                    block_stack.push(BlockStyle::Bold);
+                }
+                _ => {}
+            },
+            Event::End(tag) => match tag {
+                Tag::Heading(_, _, _) | Tag::CodeBlock(_) | Tag::List(_) | Tag::Paragraph => {
+                    flush_line(&mut current_line, &mut lines);
+                    let _ = block_stack.pop();
+                }
+                Tag::Item => {
+                    flush_line(&mut current_line, &mut lines);
+                    task_list_checked = None;
+                    let _ = block_stack.pop();
+                }
+                Tag::Strong | Tag::Emphasis => {
+                    let _ = block_stack.pop();
+                }
+                _ => {}
+            },
             Event::TaskListMarker(checked) => {
                 task_list_checked = Some(checked);
                 if matches!(block_stack.last(), Some(BlockStyle::ListItem))
@@ -95,7 +88,8 @@ pub fn render_markdown(content: &str, theme: &ResolvedTheme) -> Vec<Line<'static
                 }
                 let marker = if checked { "[x] " } else { "[ ] " };
                 let style = if checked {
-                    theme.editor_checkbox_checked_style
+                    theme
+                        .editor_checkbox_checked_style
                         .patch(theme.preview_text_style)
                 } else {
                     theme.editor_checkbox_style.patch(theme.preview_text_style)
@@ -121,18 +115,13 @@ pub fn render_markdown(content: &str, theme: &ResolvedTheme) -> Vec<Line<'static
                     String::new()
                 };
                 if !prefix.is_empty() {
-                    current_line.push(Span::styled(
-                        prefix,
-                        theme.md_list_marker_style,
-                    ));
+                    current_line.push(Span::styled(prefix, theme.md_list_marker_style));
                 }
                 current_line.push(Span::styled(text.to_string(), style));
                 task_list_checked = None;
             }
             Event::Code(text) => {
-                let style = theme
-                    .preview_text_style
-                    .patch(theme.md_code_bg_style);
+                let style = theme.preview_text_style.patch(theme.md_code_bg_style);
                 current_line.push(Span::styled(text.to_string(), style));
             }
             Event::SoftBreak | Event::HardBreak => {
@@ -152,10 +141,7 @@ pub fn render_markdown(content: &str, theme: &ResolvedTheme) -> Vec<Line<'static
     flush_line(&mut current_line, &mut lines);
 
     if lines.is_empty() {
-        lines.push(Line::from(Span::styled(
-            "",
-            theme.preview_text_style,
-        )));
+        lines.push(Line::from(Span::styled("", theme.preview_text_style)));
     }
 
     lines
@@ -176,14 +162,10 @@ fn block_style(stack: &[BlockStyle], theme: &ResolvedTheme) -> ratatui::style::S
         match s {
             BlockStyle::Heading => return theme.md_header_fg_style,
             BlockStyle::CodeBlock => {
-                return theme
-                    .preview_text_style
-                    .patch(theme.md_code_bg_style);
+                return theme.preview_text_style.patch(theme.md_code_bg_style);
             }
             BlockStyle::Bold => {
-                return theme
-                    .preview_text_style
-                    .add_modifier(Modifier::BOLD);
+                return theme.preview_text_style.add_modifier(Modifier::BOLD);
             }
             _ => {}
         }

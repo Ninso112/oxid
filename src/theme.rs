@@ -319,7 +319,10 @@ pub struct ResolvedTheme {
 
 impl ResolvedTheme {
     /// Build resolved theme from theme.toml, optionally overriding with config.toml [theme].
-    pub fn resolve(theme: &Theme, config_theme: Option<&crate::config::ThemeConfig>) -> Result<Self> {
+    pub fn resolve(
+        theme: &Theme,
+        config_theme: Option<&crate::config::ThemeConfig>,
+    ) -> Result<Self> {
         let bg = config_theme
             .map(|c| parse_color_str(&c.background))
             .transpose()?
@@ -379,29 +382,23 @@ impl ResolvedTheme {
             help_text_style: Style::default().fg(theme.help_text.to_ratatui_color()?),
             editor_bg_style: Style::default().bg(bg),
             editor_fg_style: Style::default().fg(fg),
-            editor_cursor_style: Style::default()
-                .fg(cursor)
-                .add_modifier(Modifier::REVERSED),
+            editor_cursor_style: Style::default().fg(cursor).add_modifier(Modifier::REVERSED),
             editor_line_number_style: Style::default()
                 .fg(theme.editor_line_number.to_ratatui_color()?),
             md_header_fg_style: Style::default()
                 .fg(theme.md_header_fg.to_ratatui_color()?)
                 .add_modifier(Modifier::BOLD),
             md_code_bg_style: Style::default().bg(theme.md_code_bg.to_ratatui_color()?),
-            md_list_marker_style: Style::default()
-                .fg(theme.md_list_marker.to_ratatui_color()?),
-            editor_header_style: Style::default()
-                .fg(theme.editor_header.to_ratatui_color()?),
-            editor_list_style: Style::default()
-                .fg(theme.editor_list.to_ratatui_color()?),
+            md_list_marker_style: Style::default().fg(theme.md_list_marker.to_ratatui_color()?),
+            editor_header_style: Style::default().fg(theme.editor_header.to_ratatui_color()?),
+            editor_list_style: Style::default().fg(theme.editor_list.to_ratatui_color()?),
             editor_checkbox_style: Style::default()
                 .fg(theme.editor_checkbox.to_ratatui_color()?)
                 .add_modifier(Modifier::BOLD),
             editor_checkbox_checked_style: Style::default()
                 .fg(theme.editor_checkbox_checked.to_ratatui_color()?)
                 .add_modifier(Modifier::CROSSED_OUT),
-            list_directory_style: Style::default()
-                .fg(theme.list_directory.to_ratatui_color()?),
+            list_directory_style: Style::default().fg(theme.list_directory.to_ratatui_color()?),
             editor_code_block_style: Style::default()
                 .fg(theme.editor_code_block.to_ratatui_color()?),
             editor_code_keyword_style: Style::default()
