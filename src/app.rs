@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // oxid - A fast, keyboard-driven note manager TUI for Linux
 
-use crate::config::{expand_path, load_config, Config};
+use crate::config::{expand_path, key_display_string, load_config, Config, ResolvedKeys};
+use crate::handlers::key_matches;
 use crate::git::{get_git_status, GitStatus};
 use crate::search::{filter_notes, get_match_indices};
 use crate::spellcheck::Spellchecker;
@@ -18,7 +19,9 @@ use std::fs;
 use std::io::Read;
 use std::path::PathBuf;
 use std::process::Command;
+use std::time::{Duration, Instant};
 use tui_textarea::{CursorMove, Scrolling, TextArea};
+use walkdir::WalkDir;
 
 /// Maximum bytes to read from a note file for indexing and preview.
 const MAX_CONTENT_BYTES: usize = 100_000;
@@ -43,6 +46,12 @@ pub enum Focus {
     Rename,
     /// Create directory popup (Shift+n).
     CreatingDirectory,
+    /// Backlinks panel.
+    Backlinks,
+    /// Tag explorer view.
+    TagExplorer,
+    /// Global task board (unchecked tasks).
+    TaskView,
 }
 
 /// Single editor buffer (tab).
@@ -87,13 +96,14 @@ pub enum Mode {
     Create,
 }
 
-/// Represents a note file with name, path, content, and searchable string.
+/// Represents a file or directory in the explorer.
 #[derive(Clone, Debug)]
 pub struct NoteEntry {
     pub path: PathBuf,
     pub display: String,
     pub content: String,
     pub(crate) searchable: String,
+    pub is_directory: bool,
 }
 
 impl NoteEntry {
@@ -103,6 +113,18 @@ impl NoteEntry {
             display,
             content,
             searchable,
+            is_directory: false,
+        }
+    }
+
+    pub fn dir(path: PathBuf, display: String) -> Self {
+        let searchable = display.clone();
+        Self {
+            path,
+            display,
+            content: String::new(),
+            searchable,
+            is_directory: true,
         }
     }
 }
@@ -111,6 +133,14 @@ impl AsRef<str> for NoteEntry {
     fn as_ref(&self) -> &str {
         &self.searchable
     }
+}
+
+/// Unchecked task from a markdown file (`- [ ] ...`).
+#[derive(Clone, Debug)]
+pub struct TaskEntry {
+    pub path: PathBuf,
+    pub line_number: usize,
+    pub content: String,
 }
 
 /// Command palette action.
@@ -154,8 +184,11 @@ impl CommandAction {
 /// Main application state.
 pub struct App {
     pub config: Config,
+    pub resolved_keys: ResolvedKeys,
     pub theme: ResolvedTheme,
     pub notes_dir: PathBuf,
+    /// Directory currently being browsed in the file explorer.
+    pub current_dir: PathBuf,
     pub all_notes: Vec<NoteEntry>,
     pub filtered_notes: Vec<NoteEntry>,
     pub selected: usize,
@@ -210,6 +243,34 @@ pub struct App {
 
     // g-pending for gt/gT tab switch
     pub g_pending: bool,
+
+    // Backlinks
+    pub backlinks: Vec<PathBuf>,
+    pub backlinks_selected: usize,
+
+    // Tag Explorer
+    pub tag_explorer_active: bool,
+    pub all_tags: Vec<String>,
+    pub tag_selected: usize,
+    pub tag_files: Vec<PathBuf>,
+    pub tag_file_selected: usize,
+    pub tag_explorer_view: TagExplorerView,
+
+    // Auto-save
+    pub last_keystroke_time: Option<Instant>,
+    pub editor_dirty: bool,
+    pub save_indicator_until: Option<Instant>,
+
+    // Global Task Board
+    pub task_view_active: bool,
+    pub tasks: Vec<TaskEntry>,
+    pub task_selected: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum TagExplorerView {
+    TagList,
+    FileList,
 }
 
 impl App {
@@ -244,17 +305,57 @@ impl App {
         !self.buffers.is_empty()
     }
 
+    /// Returns the display string for a keybinding action (e.g. "quit" -> "Q").
+    pub fn get_key_display_string(&self, action_name: &str) -> String {
+        let s = match action_name {
+            "quit" => &self.config.keys.quit,
+            "zen_mode" => &self.config.keys.zen_mode,
+            "search" => &self.config.keys.search,
+            "command_palette" => &self.config.keys.command_palette,
+            "daily_note" => &self.config.keys.daily_note,
+            "task_board" => &self.config.keys.task_board,
+            "escape" => &self.config.keys.escape,
+            "enter" => &self.config.keys.enter,
+            "backspace" => &self.config.keys.backspace,
+            "move_up" => &self.config.keys.move_up,
+            "move_down" => &self.config.keys.move_down,
+            "move_left" => &self.config.keys.move_left,
+            "delete" => &self.config.keys.delete,
+            "list_create_note" => &self.config.keys.list_create_note,
+            "list_create_dir" => &self.config.keys.list_create_dir,
+            "list_tag_explorer" => &self.config.keys.list_tag_explorer,
+            "list_rename" => &self.config.keys.list_rename,
+            "list_edit_config" => &self.config.keys.list_edit_config,
+            "list_delete" => &self.config.keys.list_delete,
+            "list_parent" => &self.config.keys.list_parent,
+            "list_parent_alt" => &self.config.keys.list_parent_alt,
+            "editor_back" => &self.config.keys.editor_back,
+            "editor_pdf" => &self.config.keys.editor_pdf,
+            "editor_backlinks" => &self.config.keys.editor_backlinks,
+            "editor_wiki_link" => &self.config.keys.editor_wiki_link,
+            "editor_insert" => &self.config.keys.editor_insert,
+            "editor_append" => &self.config.keys.editor_append,
+            "editor_split_focus" => &self.config.keys.editor_split_focus,
+            "move_up_alt" => &self.config.keys.move_up_alt,
+            "move_down_alt" => &self.config.keys.move_down_alt,
+            "move_left_alt" => &self.config.keys.move_left_alt,
+            _ => return String::new(),
+        };
+        key_display_string(s)
+    }
+
     pub fn new() -> Result<Self> {
         let config = load_config()?;
         let config_dir = crate::config::ensure_config_dir()?;
         let theme_raw = load_theme(&config_dir)?;
-        let theme = ResolvedTheme::from_theme(&theme_raw)?;
+        let theme = ResolvedTheme::resolve(&theme_raw, Some(&config.theme))?;
         let notes_dir = expand_path(&config.notes_directory);
 
         fs::create_dir_all(&notes_dir)
             .map_err(|e| anyhow::anyhow!("Failed to create notes directory: {}", e))?;
 
-        let all_notes = load_notes(&notes_dir)?;
+        let current_dir = notes_dir.clone();
+        let all_notes = load_entries(&current_dir)?;
         let filtered_notes = all_notes.clone();
         let match_indices = vec![Vec::new(); filtered_notes.len()];
         let matcher = Matcher::new(MatcherConfig::DEFAULT.match_paths());
@@ -269,10 +370,13 @@ impl App {
             None
         };
 
+        let resolved_keys = ResolvedKeys::from_config(&config.keys);
         let mut app = Self {
             config,
+            resolved_keys,
             theme,
             notes_dir,
+            current_dir,
             all_notes,
             filtered_notes,
             selected: 0,
@@ -305,16 +409,109 @@ impl App {
             template_picker_selected: 0,
             spellchecker,
             g_pending: false,
+            backlinks: Vec::new(),
+            backlinks_selected: 0,
+            tag_explorer_active: false,
+            all_tags: Vec::new(),
+            tag_selected: 0,
+            tag_files: Vec::new(),
+            tag_file_selected: 0,
+            tag_explorer_view: TagExplorerView::TagList,
+            last_keystroke_time: None,
+            editor_dirty: false,
+            save_indicator_until: None,
+            task_view_active: false,
+            tasks: Vec::new(),
+            task_selected: 0,
         };
         app.apply_editor_theme_to_all();
         Ok(app)
     }
 
     pub fn refresh_notes(&mut self) -> Result<()> {
-        self.all_notes = load_notes(&self.notes_dir)?;
+        self.all_notes = load_entries(&self.current_dir)?;
+        if !self.config.ui.show_hidden {
+            self.all_notes
+                .retain(|e| !e.display.starts_with('.'));
+        }
         self.apply_filter();
         self.clamp_selection();
         Ok(())
+    }
+
+    /// Returns Nerd Font icon for path/extension when config.ui.icons is true, else empty string.
+    pub fn file_icon(&self, path: &std::path::Path) -> &'static str {
+        if !self.config.ui.icons {
+            return "";
+        }
+        let ext = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("");
+        match ext.to_lowercase().as_str() {
+            "md" | "markdown" => "\u{f48a} ",   // md
+            "rs" => "\u{e79b} ",                 // rust
+            "toml" | "yaml" | "yml" => "\u{f718} ", // config
+            "json" => "\u{e60b} ",               // json
+            "txt" => "\u{f15c} ",                // text
+            "pdf" => "\u{f1c1} ",                // pdf
+            "png" | "jpg" | "jpeg" | "gif" | "svg" => "\u{f1c5} ", // image
+            _ if path.is_dir() => "\u{f115} ",   // folder
+            _ => "\u{f016} ",                    // file
+        }
+    }
+
+    /// Enter the selected directory. Returns true if we navigated.
+    pub fn enter_selected_directory(&mut self) -> bool {
+        let entry = match self.filtered_notes.get(self.selected) {
+            Some(e) if e.is_directory => e,
+            _ => return false,
+        };
+        match fs::metadata(&entry.path) {
+            Ok(m) if m.is_dir() => {}
+            _ => return false,
+        }
+        self.current_dir = entry.path.clone();
+        if let Err(e) = self.refresh_notes() {
+            self.message = Some(format!("Cannot read directory: {}", e));
+        }
+        true
+    }
+
+    /// Go to parent directory. Returns true if we navigated. Never goes above notes_dir.
+    pub fn go_to_parent_dir(&mut self) -> bool {
+        if self.current_dir == self.notes_dir {
+            return false;
+        }
+        let parent = match self.current_dir.parent() {
+            Some(p) => p.to_path_buf(),
+            None => return false,
+        };
+        if !parent.starts_with(&self.notes_dir) {
+            return false;
+        }
+        let prev_folder_name = self
+            .current_dir
+            .file_name()
+            .and_then(|n| n.to_str())
+            .map(|s| format!("{}/", s));
+        self.current_dir = parent;
+        if let Err(e) = self.refresh_notes() {
+            self.message = Some(format!("Cannot read directory: {}", e));
+            return true;
+        }
+        if let Some(name) = prev_folder_name {
+            if let Some(idx) = self.filtered_notes.iter().position(|e| e.display == name) {
+                self.selected = idx;
+            }
+        }
+        true
+    }
+
+    /// Check if we can go up (not at notes root).
+    #[allow(dead_code)]
+    pub fn can_go_up(&self) -> bool {
+        self.current_dir != self.notes_dir
     }
 
     fn apply_filter(&mut self) {
@@ -426,10 +623,14 @@ impl App {
 
     pub fn reload_config(&mut self) -> Result<()> {
         self.config = load_config()?;
+        self.resolved_keys = ResolvedKeys::from_config(&self.config.keys);
         let config_dir = crate::config::ensure_config_dir()?;
         let theme_raw = load_theme(&config_dir)?;
-        self.theme = ResolvedTheme::from_theme(&theme_raw)?;
+        self.theme = ResolvedTheme::resolve(&theme_raw, Some(&self.config.theme))?;
         self.notes_dir = expand_path(&self.config.notes_directory);
+        if !self.current_dir.starts_with(&self.notes_dir) {
+            self.current_dir = self.notes_dir.clone();
+        }
         self.apply_editor_theme_to_all();
         self.spellchecker = if self.config.editor.enable_spellcheck
             && !self.config.editor.spellcheck_languages.is_empty()
@@ -441,13 +642,37 @@ impl App {
         Ok(())
     }
 
+    /// Open or create today's daily note and switch editor to it.
+    pub fn open_daily_note(&mut self) -> Result<()> {
+        let date = Local::now().format("%Y-%m-%d").to_string();
+        let folder = self.notes_dir.join(self.config.daily_notes_folder.trim());
+        fs::create_dir_all(&folder)?;
+        let path = folder.join(format!("{}.md", date));
+        if !path.exists() {
+            let header = format!("# Daily Note: {}\n\n", date);
+            fs::write(&path, header)?;
+        }
+        self.load_file_into_editor(path)
+    }
+
     /// Load file content into a new or existing tab and switch focus to Editor.
     pub fn load_file_into_editor(&mut self, path: PathBuf) -> Result<()> {
+        self.load_file_into_editor_at_line(path, None)
+    }
+
+    /// Load file and optionally move cursor to the given 0-based line.
+    pub fn load_file_into_editor_at_line(&mut self, path: PathBuf, goto_line: Option<usize>) -> Result<()> {
         // Check if already open
         if let Some(idx) = self.buffers.iter().position(|b| b.path.as_ref() == Some(&path)) {
             self.active_tab = idx;
             self.focus = Focus::Editor;
             self.editor_mode = EditorMode::Normal;
+            if let Some(line) = goto_line {
+                if let Some(buf) = self.buffers.get_mut(idx) {
+                    let row = line.min(buf.textarea.lines().len().saturating_sub(1));
+                    buf.textarea.move_cursor(CursorMove::Jump(row as u16, 0));
+                }
+            }
             return Ok(());
         }
         let content = fs::read_to_string(&path).unwrap_or_default();
@@ -458,11 +683,18 @@ impl App {
         };
         let mut buf = EditorBuffer::new(Some(path), lines);
         buf.textarea.set_max_histories(50);
-        Self::apply_theme_to_textarea(&self.theme, &mut buf.textarea);
+        if let Some(line) = goto_line {
+            let row = line.min(buf.textarea.lines().len().saturating_sub(1));
+            buf.textarea.move_cursor(CursorMove::Jump(row as u16, 0));
+        }
+        Self::apply_theme_to_textarea(&self.theme, &mut buf.textarea, &self.config.editor);
         self.buffers.push(buf);
         self.active_tab = self.buffers.len() - 1;
         self.focus = Focus::Editor;
         self.editor_mode = EditorMode::Normal;
+        if self.config.editor.show_backlinks {
+            self.scan_backlinks();
+        }
         Ok(())
     }
 
@@ -474,10 +706,15 @@ impl App {
 
     /// Delete the selected note file. If it was open in the editor, clears buffers.
     pub fn delete_selected_note(&mut self) -> Result<()> {
-        let path = match self.get_selected_path() {
-            Some(p) => p,
+        let entry = match self.filtered_notes.get(self.selected) {
+            Some(e) => e,
             None => return Ok(()),
         };
+        if entry.is_directory {
+            self.message = Some("Use a file manager to delete directories".to_string());
+            return Ok(());
+        }
+        let path = entry.path.clone();
 
         if path.ends_with("config.toml") || path.ends_with("theme.toml") {
             self.message = Some("Cannot delete config files".to_string());
@@ -516,6 +753,7 @@ impl App {
                 }
             }
         }
+        self.editor_dirty = false;
         if need_reload {
             let _ = self.reload_config();
         }
@@ -523,12 +761,49 @@ impl App {
         Ok(())
     }
 
+    /// Mark that the editor content has changed (for auto-save tracking).
+    pub fn mark_editor_dirty(&mut self) {
+        self.editor_dirty = true;
+        self.last_keystroke_time = Some(Instant::now());
+    }
+
+    /// Check auto-save condition and save if needed. Returns true if a save was performed.
+    pub fn check_auto_save(&mut self) -> Result<bool> {
+        if !self.config.editor.auto_save || !self.editor_dirty {
+            return Ok(false);
+        }
+        let last = match self.last_keystroke_time {
+            Some(t) => t,
+            None => return Ok(false),
+        };
+        let interval = Duration::from_secs(self.config.editor.auto_save_interval);
+        if Instant::now().duration_since(last) < interval {
+            return Ok(false);
+        }
+        self.save_all_buffers()?;
+        self.save_indicator_until = Some(Instant::now() + Duration::from_secs(2));
+        Ok(true)
+    }
+
+    /// Clear "Saved..." indicator when expired.
+    pub fn tick_save_indicator(&mut self) {
+        if let Some(until) = self.save_indicator_until {
+            if Instant::now() >= until {
+                self.save_indicator_until = None;
+            }
+        }
+    }
+
     /// Save the current editor content to disk.
     pub fn save_editor(&mut self) -> Result<()> {
         self.save_all_buffers()
     }
 
-    fn apply_theme_to_textarea(theme: &ResolvedTheme, textarea: &mut TextArea<'static>) {
+    fn apply_theme_to_textarea(
+        theme: &ResolvedTheme,
+        textarea: &mut TextArea<'static>,
+        editor_config: &crate::config::EditorConfig,
+    ) {
         let editor_style = theme.editor_fg_style.patch(theme.editor_bg_style);
         textarea.set_style(editor_style);
         textarea.set_cursor_style(theme.editor_cursor_style);
@@ -536,30 +811,37 @@ impl App {
             ratatui::style::Style::default()
                 .add_modifier(ratatui::style::Modifier::UNDERLINED),
         );
-        textarea.set_line_number_style(theme.editor_line_number_style);
-        // Headers (# ), list markers (- ), unchecked (- [ ]), checked (- [x])
+        if editor_config.line_numbers {
+            textarea.set_line_number_style(theme.editor_line_number_style);
+        } else {
+            textarea.remove_line_number();
+        }
+        let tab_len = editor_config.tab_width.clamp(1, 16);
+        textarea.set_tab_length(tab_len);
+        // Headers (# ), list markers (- ), unchecked (- [ ]), checked (- [x]), code blocks (```)
         let _ = textarea.set_search_pattern(
-            r"(^#{1,6} )|(^[-*] )|(^[-*] \[ \])|(^[-*] \[[xX]\])",
+            r"(^#{1,6} )|(^[-*] )|(^[-*] \[ \])|(^[-*] \[[xX]\])|(^```)",
         );
         textarea.set_search_style(
             theme
                 .editor_header_style
                 .patch(theme.editor_list_style)
                 .patch(theme.editor_checkbox_style)
-                .patch(theme.editor_checkbox_checked_style),
+                .patch(theme.editor_checkbox_checked_style)
+                .patch(theme.editor_code_block_style),
         );
     }
 
     fn apply_editor_theme_to_all(&mut self) {
         for buf in self.buffers.iter_mut() {
-            Self::apply_theme_to_textarea(&self.theme, &mut buf.textarea);
+            Self::apply_theme_to_textarea(&self.theme, &mut buf.textarea, &self.config.editor);
         }
     }
 
     /// Handle editor input in Normal mode (vim-like).
     pub fn editor_normal_input(&mut self, key: crossterm::event::KeyEvent) -> bool {
         use crossterm::event::KeyCode;
-        if key.code == KeyCode::Esc {
+        if key_matches(key, &[self.resolved_keys.escape]) {
             self.editor_mode = EditorMode::Normal;
             self.g_pending = false;
             return true;
@@ -583,6 +865,12 @@ impl App {
                     self.close_tab();
                     return true;
                 }
+                KeyCode::Char('d') => {
+                    if let Some(link) = self.get_wiki_link_under_cursor() {
+                        let _ = self.open_wiki_link(&link);
+                    }
+                    return true;
+                }
                 _ => {}
             }
         }
@@ -590,7 +878,7 @@ impl App {
             self.g_pending = true;
             return true;
         }
-        if key.code == KeyCode::Char('q') {
+        if key_matches(key, &[self.resolved_keys.editor_back]) {
             self.focus_list();
             return true;
         }
@@ -745,12 +1033,14 @@ impl App {
 
     // Rename popup (r)
     pub fn enter_rename(&mut self) {
-        if let Some(path) = self.get_selected_path() {
-            self.rename_input = path
+        if let Some(entry) = self.filtered_notes.get(self.selected) {
+            let name = entry
+                .path
                 .file_name()
                 .and_then(|n| n.to_str())
                 .unwrap_or("")
                 .to_string();
+            self.rename_input = name;
             self.focus = Focus::Rename;
         }
     }
@@ -769,21 +1059,26 @@ impl App {
     }
 
     pub fn rename_selected_note(&mut self) -> Result<()> {
-        let old_path = match self.get_selected_path() {
-            Some(p) => p,
+        let entry = match self.filtered_notes.get(self.selected) {
+            Some(e) => e,
             None => return Ok(()),
         };
+        let old_path = entry.path.clone();
+        let is_dir = entry.is_directory;
         let name = self.rename_input.trim();
         if name.is_empty() {
-            self.message = Some("Filename cannot be empty".to_string());
+            self.message = Some("Name cannot be empty".to_string());
             return Ok(());
         }
-        let name = if name.ends_with(".md") {
+        let name = if is_dir {
+            name.to_string()
+        } else if name.ends_with(".md") {
             name.to_string()
         } else {
             format!("{}.md", name)
         };
-        let new_path = self.notes_dir.join(&name);
+        let parent = old_path.parent().unwrap_or(&self.current_dir);
+        let new_path = parent.join(&name);
         if new_path.exists() && new_path != old_path {
             self.message = Some("File already exists".to_string());
             return Ok(());
@@ -824,7 +1119,7 @@ impl App {
             self.message = Some("Directory name cannot be empty".to_string());
             return Ok(());
         }
-        let path = self.notes_dir.join(&name);
+        let path = self.current_dir.join(&name);
         if path.exists() {
             self.message = Some("Directory already exists".to_string());
             return Ok(());
@@ -886,7 +1181,7 @@ impl App {
         if let Some(buf) = self.buffers.get_mut(idx) {
             buf.textarea = TextArea::new(new_lines);
             buf.textarea.set_max_histories(50);
-            Self::apply_theme_to_textarea(&theme, &mut buf.textarea);
+            Self::apply_theme_to_textarea(&theme, &mut buf.textarea, &self.config.editor);
             let r = row as u16;
             let c = new_col.min(u16::MAX as usize) as u16;
             buf.textarea.move_cursor(CursorMove::Jump(r, c));
@@ -921,18 +1216,235 @@ impl App {
         let path = self.editing_path()
             .as_ref()
             .and_then(|p| p.parent())
-            .unwrap_or(&self.notes_dir)
+            .unwrap_or(&self.current_dir)
             .join(&name);
         if path.exists() {
             self.load_file_into_editor(path)?;
         } else {
-            let path = self.notes_dir.join(&name);
+            let path = self.current_dir.join(&name);
             if path.exists() {
                 self.load_file_into_editor(path)?;
             } else {
                 fs::File::create(&path)?;
                 self.load_file_into_editor(path)?;
             }
+        }
+        Ok(())
+    }
+
+    /// Scan for backlinks to the current file. Returns paths of files containing [[current_file_name]].
+    pub fn scan_backlinks(&mut self) {
+        self.backlinks.clear();
+        self.backlinks_selected = 0;
+        let current_file_name = match self.editing_path() {
+            Some(p) => p.file_stem().and_then(|s| s.to_str()).map(|s| s.to_string()),
+            None => return,
+        };
+        let Some(target_name) = current_file_name else { return };
+        let pattern = format!("[[{}]]", target_name);
+        let current_path = self.editing_path();
+
+        for entry in WalkDir::new(&self.notes_dir)
+            .follow_links(true)
+            .into_iter()
+            .filter_map(|e| e.ok())
+        {
+            let path = entry.path();
+            if !path.is_file() || path.extension().map_or(true, |e| e != "md") {
+                continue;
+            }
+            if current_path.as_ref() == Some(&path.to_path_buf()) {
+                continue;
+            }
+            if let Ok(content) = fs::read_to_string(path) {
+                if content.contains(&pattern) {
+                    self.backlinks.push(path.to_path_buf());
+                }
+            }
+        }
+        self.backlinks.sort();
+    }
+
+    pub fn backlinks_move_up(&mut self) {
+        if self.backlinks_selected > 0 {
+            self.backlinks_selected -= 1;
+        }
+    }
+
+    pub fn backlinks_move_down(&mut self) {
+        if self.backlinks_selected + 1 < self.backlinks.len() {
+            self.backlinks_selected += 1;
+        }
+    }
+
+    pub fn open_selected_backlink(&mut self) -> Result<()> {
+        if let Some(path) = self.backlinks.get(self.backlinks_selected).cloned() {
+            self.load_file_into_editor(path)?;
+        }
+        Ok(())
+    }
+
+    // Tag Explorer
+    pub fn enter_tag_explorer(&mut self) {
+        self.tag_explorer_active = true;
+        self.tag_explorer_view = TagExplorerView::TagList;
+        self.focus = Focus::TagExplorer;
+        self.scan_all_tags();
+    }
+
+    pub fn exit_tag_explorer(&mut self) {
+        self.tag_explorer_active = false;
+        self.focus = Focus::List;
+    }
+
+    pub fn scan_all_tags(&mut self) {
+        use std::collections::HashSet;
+        let mut tags = HashSet::new();
+        let re = Regex::new(r"#(\w+)").unwrap();
+
+        for entry in WalkDir::new(&self.notes_dir)
+            .follow_links(true)
+            .into_iter()
+            .filter_map(|e| e.ok())
+        {
+            let path = entry.path();
+            if !path.is_file() || path.extension().map_or(true, |e| e != "md") {
+                continue;
+            }
+            if let Ok(content) = fs::read_to_string(path) {
+                for cap in re.captures_iter(&content) {
+                    if let Some(tag) = cap.get(1) {
+                        tags.insert(tag.as_str().to_string());
+                    }
+                }
+            }
+        }
+
+        self.all_tags = tags.into_iter().collect();
+        self.all_tags.sort();
+        self.tag_selected = 0;
+        self.tag_files.clear();
+        self.tag_file_selected = 0;
+    }
+
+    pub fn tag_list_move_up(&mut self) {
+        if self.tag_selected > 0 {
+            self.tag_selected -= 1;
+        }
+    }
+
+    pub fn tag_list_move_down(&mut self) {
+        if self.tag_selected + 1 < self.all_tags.len() {
+            self.tag_selected += 1;
+        }
+    }
+
+    pub fn tag_file_move_up(&mut self) {
+        if self.tag_file_selected > 0 {
+            self.tag_file_selected -= 1;
+        }
+    }
+
+    pub fn tag_file_move_down(&mut self) {
+        if self.tag_file_selected + 1 < self.tag_files.len() {
+            self.tag_file_selected += 1;
+        }
+    }
+
+    pub fn load_files_for_selected_tag(&mut self) {
+        if let Some(tag) = self.all_tags.get(self.tag_selected) {
+            self.tag_files.clear();
+            self.tag_file_selected = 0;
+            let pattern = format!("#{}", tag);
+
+            for entry in WalkDir::new(&self.notes_dir)
+                .follow_links(true)
+                .into_iter()
+                .filter_map(|e| e.ok())
+            {
+                let path = entry.path();
+                if !path.is_file() || path.extension().map_or(true, |e| e != "md") {
+                    continue;
+                }
+                if let Ok(content) = fs::read_to_string(path) {
+                    if content.contains(&pattern) {
+                        self.tag_files.push(path.to_path_buf());
+                    }
+                }
+            }
+            self.tag_files.sort();
+            self.tag_explorer_view = TagExplorerView::FileList;
+        }
+    }
+
+    pub fn open_selected_tag_file(&mut self) -> Result<()> {
+        if let Some(path) = self.tag_files.get(self.tag_file_selected).cloned() {
+            self.exit_tag_explorer();
+            self.load_file_into_editor(path)?;
+        }
+        Ok(())
+    }
+
+    // Global Task Board
+    pub fn enter_task_view(&mut self) {
+        self.task_view_active = true;
+        self.focus = Focus::TaskView;
+        self.scan_tasks();
+    }
+
+    pub fn exit_task_view(&mut self) {
+        self.task_view_active = false;
+        self.focus = Focus::List;
+    }
+
+    /// Recursively scan workspace for lines starting with `- [ ]` (unchecked tasks).
+    pub fn scan_tasks(&mut self) {
+        self.tasks.clear();
+        self.task_selected = 0;
+
+        for entry in WalkDir::new(&self.notes_dir)
+            .follow_links(true)
+            .into_iter()
+            .filter_map(|e| e.ok())
+        {
+            let path = entry.path();
+            if !path.is_file() || path.extension().map_or(true, |e| e != "md") {
+                continue;
+            }
+            let path_buf = path.to_path_buf();
+            if let Ok(content) = fs::read_to_string(path) {
+                for (zero_based_line, line) in content.lines().enumerate() {
+                    if line.trim_start().starts_with("- [ ]") {
+                        let content = line.trim_start().trim_start_matches("- [ ]").trim().to_string();
+                        self.tasks.push(TaskEntry {
+                            path: path_buf.clone(),
+                            line_number: zero_based_line,
+                            content,
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn task_move_up(&mut self) {
+        if self.task_selected > 0 {
+            self.task_selected -= 1;
+        }
+    }
+
+    pub fn task_move_down(&mut self) {
+        if self.task_selected + 1 < self.tasks.len() {
+            self.task_selected += 1;
+        }
+    }
+
+    pub fn open_selected_task(&mut self) -> Result<()> {
+        if let Some(task) = self.tasks.get(self.task_selected) {
+            let path = task.path.clone();
+            let line = task.line_number;
+            self.exit_task_view();
+            self.load_file_into_editor_at_line(path, Some(line))?;
         }
         Ok(())
     }
@@ -985,7 +1497,7 @@ impl App {
         } else {
             format!("{}.md", name)
         };
-        let path = self.notes_dir.join(&name);
+        let path = self.current_dir.join(&name);
         if path.exists() {
             self.message = Some("File already exists".to_string());
             return Ok(None);
@@ -1020,7 +1532,7 @@ impl App {
             if let Some(buf) = self.buffers.get_mut(idx) {
                 buf.textarea = TextArea::new(lines);
                 buf.textarea.set_max_histories(50);
-                Self::apply_theme_to_textarea(&theme, &mut buf.textarea);
+                Self::apply_theme_to_textarea(&theme, &mut buf.textarea, &self.config.editor);
                 let r = row as u16;
                 let c = (col + date.len()).min(u16::MAX as usize) as u16;
                 buf.textarea.move_cursor(CursorMove::Jump(r, c));
@@ -1123,35 +1635,59 @@ impl App {
     }
 }
 
-fn load_notes(dir: &PathBuf) -> Result<Vec<NoteEntry>> {
-    let mut notes = Vec::new();
-    let entries = fs::read_dir(dir).map_err(|e| {
-        anyhow::anyhow!("Failed to read notes directory {}: {}", dir.display(), e)
-    })?;
+fn load_entries(dir: &PathBuf) -> Result<Vec<NoteEntry>> {
+    let mut dirs = Vec::new();
+    let mut files = Vec::new();
+
+    let entries = match fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(e) => return Err(anyhow::anyhow!("Cannot read directory {}: {}", dir.display(), e)),
+    };
+
     for entry in entries {
-        let entry = entry?;
+        let entry = match entry {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
         let path = entry.path();
-        if path.is_file() {
-            if let Some(ext) = path.extension() {
-                if ext == "md" {
-                    let display = path
-                        .file_name()
-                        .and_then(|n| n.to_str())
-                        .unwrap_or("")
-                        .to_string();
-                    let (content, searchable) = read_note_content(&path, &display);
-                    notes.push(NoteEntry {
-                        path,
-                        display,
-                        content,
-                        searchable,
-                    });
-                }
+
+        let meta = match fs::metadata(&path) {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+
+        if meta.is_dir() {
+            let display = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("")
+                .to_string();
+            dirs.push(NoteEntry::dir(path, format!("{}/", display)));
+        } else if meta.is_file() {
+            if path.extension().map_or(false, |e| e == "md") {
+                let display = path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("")
+                    .to_string();
+                let (content, searchable) = read_note_content(&path, &display);
+                files.push(NoteEntry {
+                    path,
+                    display,
+                    content,
+                    searchable,
+                    is_directory: false,
+                });
             }
         }
     }
-    notes.sort_by(|a, b| a.display.to_lowercase().cmp(&b.display.to_lowercase()));
-    Ok(notes)
+
+    dirs.sort_by(|a, b| a.display.to_lowercase().cmp(&b.display.to_lowercase()));
+    files.sort_by(|a, b| a.display.to_lowercase().cmp(&b.display.to_lowercase()));
+
+    let mut result = dirs;
+    result.append(&mut files);
+    Ok(result)
 }
 
 fn read_note_content(path: &PathBuf, display: &str) -> (String, String) {

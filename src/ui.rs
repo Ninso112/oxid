@@ -8,8 +8,17 @@ use crate::templates::Template;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap};
+use ratatui::widgets::{Block, BorderType, Borders, Clear, List, ListItem, Paragraph, Wrap};
 use ratatui::Frame;
+
+fn border_type_from_config(border_style: &str) -> BorderType {
+    match border_style.trim().to_lowercase().as_str() {
+        "double" => BorderType::Double,
+        "thick" => BorderType::Thick,
+        "plain" => BorderType::Plain,
+        _ => BorderType::Rounded,
+    }
+}
 
 /// Build a Line with search match highlighting. Indices are character positions.
 fn build_highlighted_line(
@@ -106,6 +115,14 @@ pub fn draw(frame: &mut Frame, app: &App) {
         draw_command_palette_popup(frame, app, area);
         return;
     }
+    if app.tag_explorer_active {
+        draw_tag_explorer_popup(frame, app, area);
+        return;
+    }
+    if app.task_view_active {
+        draw_task_view_popup(frame, app, area);
+        return;
+    }
     if app.focus == Focus::Rename {
         draw_rename_popup(frame, app, area);
         return;
@@ -135,6 +152,36 @@ pub fn draw(frame: &mut Frame, app: &App) {
 
     if app.zen_mode {
         draw_editor_pane(frame, app, main_area);
+    } else if app.config.editor.show_backlinks {
+        let vertical_chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Percentage(70), Constraint::Percentage(30)])
+            .split(main_area);
+
+        let main_chunks = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Percentage(20),
+                Constraint::Percentage(40),
+                Constraint::Percentage(40),
+            ])
+            .split(vertical_chunks[0]);
+
+        draw_notes_list(frame, app, main_chunks[0]);
+        if app.editor_layout == EditorLayout::SplitVertical {
+            let editor_chunks = Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+                .split(main_chunks[1]);
+            draw_editor_pane_at(frame, app, editor_chunks[0], app.active_tab);
+            if let Some(right_idx) = app.split_right_tab {
+                draw_editor_pane_at(frame, app, editor_chunks[1], right_idx);
+            }
+        } else {
+            draw_editor_pane(frame, app, main_chunks[1]);
+        }
+        draw_preview_pane(frame, app, main_chunks[2]);
+        draw_backlinks_pane(frame, app, vertical_chunks[1]);
     } else {
         let main_chunks = Layout::default()
             .direction(Direction::Horizontal)
@@ -166,8 +213,9 @@ pub fn draw(frame: &mut Frame, app: &App) {
 
 fn draw_telescope_popup(frame: &mut Frame, app: &App, area: Rect) {
     let block = Block::default()
-        .title(" / │ Open File ")
+        .title(format!(" {} │ Open File ", app.get_key_display_string("search")))
         .borders(Borders::ALL)
+        .border_type(border_type_from_config(&app.config.ui.border_style))
         .border_style(app.theme.list_border_active_style);
     let popup_area = centered_rect(area, 70, 60);
     let inner = block.inner(popup_area);
@@ -218,8 +266,9 @@ fn draw_telescope_popup(frame: &mut Frame, app: &App, area: Rect) {
 
 fn draw_command_palette_popup(frame: &mut Frame, app: &App, area: Rect) {
     let block = Block::default()
-        .title(" Ctrl+p │ Command Palette ")
+        .title(format!(" {} │ Command Palette ", app.get_key_display_string("command_palette")))
         .borders(Borders::ALL)
+        .border_type(border_type_from_config(&app.config.ui.border_style))
         .border_style(app.theme.list_border_active_style);
     let popup_area = centered_rect(area, 50, 40);
     let inner = block.inner(popup_area);
@@ -263,8 +312,9 @@ fn draw_command_palette_popup(frame: &mut Frame, app: &App, area: Rect) {
 
 fn draw_rename_popup(frame: &mut Frame, app: &App, area: Rect) {
     let block = Block::default()
-        .title(" r │ Rename File ")
+        .title(format!(" {} │ Rename File ", app.get_key_display_string("list_rename")))
         .borders(Borders::ALL)
+        .border_type(border_type_from_config(&app.config.ui.border_style))
         .border_style(app.theme.list_border_active_style);
     let popup_area = centered_rect(area, 50, 15);
     let inner = block.inner(popup_area);
@@ -278,10 +328,156 @@ fn draw_rename_popup(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(Paragraph::new(content), inner);
 }
 
+fn draw_tag_explorer_popup(frame: &mut Frame, app: &App, area: Rect) {
+    use crate::app::TagExplorerView;
+    
+    let popup_area = {
+        let vertical = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Percentage(10),
+                Constraint::Percentage(80),
+                Constraint::Percentage(10),
+            ])
+            .split(area);
+        Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Percentage(10),
+                Constraint::Percentage(80),
+                Constraint::Percentage(10),
+            ])
+            .split(vertical[1])[1]
+    };
+
+    frame.render_widget(Clear, popup_area);
+
+    if app.tag_explorer_view == TagExplorerView::TagList {
+        let items: Vec<ListItem> = app
+            .all_tags
+            .iter()
+            .enumerate()
+            .map(|(i, tag)| {
+                let style = if i == app.tag_selected {
+                    app.theme.list_text_selected_style
+                } else {
+                    app.theme.list_text_normal_style
+                };
+                ListItem::new(Line::from(Span::styled(format!("#{}", tag), style)))
+            })
+            .collect();
+
+        let list = List::new(items).block(
+            Block::default()
+                .title(format!(" Tag Explorer ({} tags) ", app.all_tags.len()))
+                .borders(Borders::ALL)
+                .border_type(border_type_from_config(&app.config.ui.border_style))
+                .border_style(app.theme.border_style),
+        );
+        frame.render_widget(list, popup_area);
+    } else {
+        let selected_tag = app.all_tags.get(app.tag_selected).map(|s| s.as_str()).unwrap_or("");
+        let items: Vec<ListItem> = app
+            .tag_files
+            .iter()
+            .enumerate()
+            .map(|(i, path)| {
+                let display = path
+                    .strip_prefix(&app.notes_dir)
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_else(|_| {
+                        path.file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or("")
+                            .to_string()
+                    });
+                let style = if i == app.tag_file_selected {
+                    app.theme.list_text_selected_style
+                } else {
+                    app.theme.list_text_normal_style
+                };
+                ListItem::new(Line::from(Span::styled(display, style)))
+            })
+            .collect();
+
+        let list = List::new(items).block(
+            Block::default()
+                .title(format!(" Files with #{} ({} files) ", selected_tag, app.tag_files.len()))
+                .borders(Borders::ALL)
+                .border_type(border_type_from_config(&app.config.ui.border_style))
+                .border_style(app.theme.border_style),
+        );
+        frame.render_widget(list, popup_area);
+    }
+}
+
+fn draw_task_view_popup(frame: &mut Frame, app: &App, area: Rect) {
+    let popup_area = {
+        let vertical = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Percentage(10),
+                Constraint::Percentage(80),
+                Constraint::Percentage(10),
+            ])
+            .split(area);
+        Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Percentage(10),
+                Constraint::Percentage(80),
+                Constraint::Percentage(10),
+            ])
+            .split(vertical[1])[1]
+    };
+
+    frame.render_widget(Clear, popup_area);
+
+    let items: Vec<ListItem> = app
+        .tasks
+        .iter()
+        .enumerate()
+        .map(|(i, task)| {
+            let rel_path = task
+                .path
+                .strip_prefix(&app.notes_dir)
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|_| {
+                    task.path
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("")
+                        .to_string()
+                });
+            let display = if task.content.is_empty() {
+                format!("(empty) [{}]", rel_path)
+            } else {
+                format!("{} [{}]", task.content, rel_path)
+            };
+            let style = if i == app.task_selected {
+                app.theme.list_text_selected_style
+            } else {
+                app.theme.list_text_normal_style
+            };
+            ListItem::new(Line::from(Span::styled(display, style)))
+        })
+        .collect();
+
+    let list = List::new(items).block(
+        Block::default()
+            .title(format!(" Task Board ({} tasks) │ {}/{} move │ {} open │ {} close ", app.tasks.len(), app.get_key_display_string("move_down"), app.get_key_display_string("move_up"), app.get_key_display_string("enter"), app.get_key_display_string("escape")))
+            .borders(Borders::ALL)
+            .border_type(border_type_from_config(&app.config.ui.border_style))
+            .border_style(app.theme.border_style),
+    );
+    frame.render_widget(list, popup_area);
+}
+
 fn draw_create_directory_popup(frame: &mut Frame, app: &App, area: Rect) {
     let block = Block::default()
-        .title(" Shift+n │ New Directory ")
+        .title(format!(" {} │ New Directory ", app.get_key_display_string("list_create_dir")))
         .borders(Borders::ALL)
+        .border_type(border_type_from_config(&app.config.ui.border_style))
         .border_style(app.theme.list_border_active_style);
     let popup_area = centered_rect(area, 50, 15);
     let inner = block.inner(popup_area);
@@ -299,6 +495,7 @@ fn draw_template_picker_popup(frame: &mut Frame, app: &App, area: Rect) {
     let block = Block::default()
         .title(" New Note │ Choose Template ")
         .borders(Borders::ALL)
+        .border_type(border_type_from_config(&app.config.ui.border_style))
         .border_style(app.theme.list_border_active_style);
     let popup_area = centered_rect(area, 40, 30);
     let inner = block.inner(popup_area);
@@ -373,6 +570,7 @@ fn draw_tab_bar(frame: &mut Frame, app: &App, area: Rect) {
         .block(
             Block::default()
                 .borders(Borders::BOTTOM)
+                .border_type(border_type_from_config(&app.config.ui.border_style))
                 .border_style(app.theme.border_style),
         );
     frame.render_widget(tab_bar, area);
@@ -395,28 +593,58 @@ fn draw_notes_list(frame: &mut Frame, app: &App, area: Rect) {
         .enumerate()
         .map(|(i, note)| {
             let base_style = if i == app.selected {
-                app.theme.list_text_selected_style
+                if note.is_directory {
+                    app.theme.list_directory_style.patch(app.theme.list_text_selected_style)
+                } else {
+                    app.theme.list_text_selected_style
+                }
+            } else if note.is_directory {
+                app.theme.list_directory_style
             } else {
                 app.theme.list_text_normal_style
             };
+            let icon = app.file_icon(&note.path);
+            let display_text = format!("{}{}", icon, note.display);
             let line = if app.mode == Mode::Search && !app.search_query.is_empty() {
+                let offset = icon.chars().count() as u32;
+                let shifted: Vec<u32> = app
+                    .match_indices
+                    .get(i)
+                    .cloned()
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|idx| idx + offset)
+                    .collect();
                 build_highlighted_line(
-                    &note.display,
-                    app.match_indices.get(i).cloned().unwrap_or_default(),
+                    &display_text,
+                    shifted,
                     base_style,
                     app.theme.search_match_style,
                 )
             } else {
-                Line::from(Span::styled(note.display.as_str(), base_style))
+                Line::from(Span::styled(display_text, base_style))
             };
             ListItem::new(line)
         })
         .collect();
 
+    let list_title = if app.current_dir == app.notes_dir {
+        " Notes ".to_string()
+    } else {
+        format!(
+            " Notes ({}) ",
+            app.current_dir
+                .strip_prefix(&app.notes_dir)
+                .map(|p| format!(".../{}", p.display()))
+                .unwrap_or_else(|_| app.current_dir.display().to_string())
+        )
+    };
+    let border_type = border_type_from_config(&app.config.ui.border_style);
     let list = List::new(items).block(
         Block::default()
-            .title(" Notes ")
+            .title(list_title)
             .borders(Borders::ALL)
+            .border_type(border_type)
             .border_style(mode),
     );
     frame.render_widget(list, area);
@@ -458,6 +686,7 @@ fn draw_editor_pane_at(frame: &mut Frame, app: &App, area: Rect, buf_idx: usize)
     let block = Block::default()
         .title(title)
         .borders(Borders::ALL)
+        .border_type(border_type_from_config(&app.config.ui.border_style))
         .border_style(editor_border_style);
 
     let inner = block.inner(area);
@@ -521,18 +750,68 @@ fn draw_preview_pane(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(paragraph, area);
 }
 
+fn draw_backlinks_pane(frame: &mut Frame, app: &App, area: Rect) {
+    let border_style = if app.focus == Focus::Backlinks {
+        app.theme.preview_border_active_style
+    } else {
+        app.theme.preview_border_inactive_style
+    };
+
+    let items: Vec<ListItem> = app
+        .backlinks
+        .iter()
+        .enumerate()
+        .map(|(i, path)| {
+            let display = path
+                .strip_prefix(&app.notes_dir)
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|_| {
+                    path.file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("")
+                        .to_string()
+                });
+            let style = if i == app.backlinks_selected {
+                app.theme.list_text_selected_style
+            } else {
+                app.theme.list_text_normal_style
+            };
+            ListItem::new(Line::from(Span::styled(display, style)))
+        })
+        .collect();
+
+    let list = List::new(items).block(
+        Block::default()
+            .title(format!(" Backlinks ({}) ", app.backlinks.len()))
+            .borders(Borders::ALL)
+            .border_type(border_type_from_config(&app.config.ui.border_style))
+            .border_style(border_style),
+    );
+    frame.render_widget(list, area);
+}
+
 fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
-    let (title, content) = if app.focus == Focus::Editor {
+    let (title, content) = if app.focus == Focus::Backlinks {
+        (
+            " Backlinks ",
+            vec![
+                Span::styled(format!("{}/{} ", app.get_key_display_string("move_down"), app.get_key_display_string("move_up")), app.theme.help_text_style),
+                Span::styled("navigate", app.theme.highlight_style),
+                Span::styled(format!(" | {} ", app.get_key_display_string("enter")), app.theme.help_text_style),
+                Span::styled("open", app.theme.highlight_style),
+                Span::styled(format!(" | {} ", app.get_key_display_string("escape")), app.theme.help_text_style),
+                Span::styled("back", app.theme.highlight_style),
+            ],
+        )
+    } else if app.focus == Focus::Editor {
         (
             " Editor ",
             vec![
-                Span::styled("i/a ", app.theme.help_text_style),
+                Span::styled(format!("{}/{} ", app.get_key_display_string("editor_insert"), app.get_key_display_string("editor_append")), app.theme.help_text_style),
                 Span::styled("insert", app.theme.highlight_style),
-                Span::styled(" | Esc ", app.theme.help_text_style),
+                Span::styled(format!(" | {} ", app.get_key_display_string("escape")), app.theme.help_text_style),
                 Span::styled("normal", app.theme.highlight_style),
-                Span::styled(" | Ctrl+Space ", app.theme.help_text_style),
-                Span::styled("checkboxes", app.theme.highlight_style),
-                Span::styled(" | q ", app.theme.help_text_style),
+                Span::styled(format!(" | {} ", app.get_key_display_string("editor_back")), app.theme.help_text_style),
                 Span::styled("back", app.theme.highlight_style),
             ],
         )
@@ -541,17 +820,19 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
             Mode::Normal => (
                 " Normal ",
                 vec![
-                    Span::styled("/ ", app.theme.help_text_style),
+                    Span::styled(format!("{} ", app.get_key_display_string("search")), app.theme.help_text_style),
                     Span::styled("search", app.theme.highlight_style),
-                    Span::styled(" | Ctrl+p ", app.theme.help_text_style),
+                    Span::styled(format!(" | {} ", app.get_key_display_string("command_palette")), app.theme.help_text_style),
                     Span::styled("commands", app.theme.highlight_style),
-                    Span::styled(" | r ", app.theme.help_text_style),
+                    Span::styled(format!(" | {} ", app.get_key_display_string("list_rename")), app.theme.help_text_style),
                     Span::styled("rename", app.theme.highlight_style),
-                    Span::styled(" | N ", app.theme.help_text_style),
+                    Span::styled(format!(" | {} ", app.get_key_display_string("list_create_dir")), app.theme.help_text_style),
                     Span::styled("mkdir", app.theme.highlight_style),
-                    Span::styled(" | F11 ", app.theme.help_text_style),
+                    Span::styled(format!(" | {}/{} ", app.get_key_display_string("move_left_alt"), app.get_key_display_string("move_left")), app.theme.help_text_style),
+                    Span::styled("up", app.theme.highlight_style),
+                    Span::styled(format!(" | {} ", app.get_key_display_string("zen_mode")), app.theme.help_text_style),
                     Span::styled("zen", app.theme.highlight_style),
-                    Span::styled(" | q ", app.theme.help_text_style),
+                    Span::styled(format!(" | {} ", app.get_key_display_string("quit")), app.theme.help_text_style),
                     Span::styled("quit", app.theme.highlight_style),
                 ],
             ),
@@ -559,9 +840,9 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
                 " Search ",
                 vec![
                     Span::styled(&app.search_query, app.theme.highlight_style),
-                    Span::styled(" | Esc ", app.theme.help_text_style),
+                    Span::styled(format!(" | {} ", app.get_key_display_string("escape")), app.theme.help_text_style),
                     Span::styled("back", app.theme.highlight_style),
-                    Span::styled(" | Enter ", app.theme.help_text_style),
+                    Span::styled(format!(" | {} ", app.get_key_display_string("enter")), app.theme.help_text_style),
                     Span::styled("edit", app.theme.highlight_style),
                 ],
             ),
@@ -570,9 +851,9 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
                 vec![
                     Span::styled("Filename: ", app.theme.help_text_style),
                     Span::styled(&app.create_filename, app.theme.highlight_style),
-                    Span::styled(" | Enter ", app.theme.help_text_style),
+                    Span::styled(format!(" | {} ", app.get_key_display_string("enter")), app.theme.help_text_style),
                     Span::styled("template", app.theme.highlight_style),
-                    Span::styled(" | Esc ", app.theme.help_text_style),
+                    Span::styled(format!(" | {} ", app.get_key_display_string("escape")), app.theme.help_text_style),
                     Span::styled("cancel", app.theme.highlight_style),
                 ],
             ),
@@ -581,17 +862,24 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
 
     let mut spans = content;
 
-    // Git status indicator
+    // Git status indicator (uses theme statusbar styles)
     match app.git_status() {
         GitStatus::Clean => spans.push(Span::styled(
             " | Git: Clean ",
-            ratatui::style::Style::default().fg(ratatui::style::Color::Green),
+            app.theme.statusbar_fg_style,
         )),
         GitStatus::Dirty => spans.push(Span::styled(
             " | Git: Dirty ",
-            ratatui::style::Style::default().fg(ratatui::style::Color::Yellow),
+            app.theme.highlight_style,
         )),
         GitStatus::Unknown => {}
+    }
+
+    if app.save_indicator_until.is_some() {
+        spans.push(Span::styled(
+            " | Saved... ",
+            app.theme.highlight_style.add_modifier(Modifier::ITALIC),
+        ));
     }
 
     let mut lines = vec![Line::from(spans)];
@@ -603,13 +891,16 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
         )));
     }
 
+    let border_type = border_type_from_config(&app.config.ui.border_style);
     let footer = Paragraph::new(lines)
         .wrap(Wrap { trim: true })
         .block(
             Block::default()
                 .title(title)
                 .borders(Borders::ALL)
-                .border_style(app.theme.border_style),
+                .border_type(border_type)
+                .border_style(app.theme.border_style)
+                .style(app.theme.statusbar_bg_style),
         );
     frame.render_widget(footer, area);
 }
