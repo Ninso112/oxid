@@ -18,7 +18,7 @@ use anyhow::Result;
 use app::{App, CommandAction, EditorLayout, EditorMode, Focus, Mode, TagExplorerView};
 use clap::Parser;
 use crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyEventKind},
+    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, KeyModifiers},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -269,9 +269,27 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App)
                                 app.enter_search_mode();
                             } else if key_matches(key, &[k.list_create_note]) {
                                 app.enter_create_mode();
-                            } else if key_matches(key, &[k.list_create_dir]) {
+                            } else if key_matches(
+                                key,
+                                &[
+                                    k.list_create_dir,
+                                    crossterm::event::KeyEvent::new(
+                                        KeyCode::Char('N'),
+                                        KeyModifiers::empty(),
+                                    ),
+                                ],
+                            ) {
                                 app.enter_create_directory();
-                            } else if key_matches(key, &[k.list_tag_explorer]) {
+                            } else if key_matches(
+                                key,
+                                &[
+                                    k.list_tag_explorer,
+                                    crossterm::event::KeyEvent::new(
+                                        KeyCode::Char('T'),
+                                        KeyModifiers::empty(),
+                                    ),
+                                ],
+                            ) {
                                 app.enter_tag_explorer();
                             } else if key_matches(key, &[k.list_rename]) {
                                 app.enter_rename();
