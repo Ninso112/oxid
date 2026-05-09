@@ -26,6 +26,21 @@ use walkdir::WalkDir;
 /// Maximum bytes to read from a note file for indexing and preview.
 const MAX_CONTENT_BYTES: usize = 100_000;
 
+/// Default date format for daily notes.
+const DAILY_NOTE_DATE_FORMAT: &str = "%Y-%m-%d";
+
+/// File extension for markdown notes.
+#[allow(dead_code)]
+const MARKDOWN_EXT: &str = "md";
+
+/// Config file name.
+#[allow(dead_code)]
+const CONFIG_FILE_NAME: &str = "config.toml";
+
+/// Theme file name.
+#[allow(dead_code)]
+const THEME_FILE_NAME: &str = "theme.toml";
+
 /// Layout mode for editor panes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EditorLayout {
@@ -249,9 +264,11 @@ pub struct App {
     // g-pending for gt/gT tab switch
     pub g_pending: bool,
 
-    // Backlinks
+    // Backlinks (cached, invalidated on save)
     pub backlinks: Vec<PathBuf>,
     pub backlinks_selected: usize,
+    backlinks_cache_valid: bool,
+    cached_backlink_target: Option<PathBuf>,
 
     // Tag Explorer
     pub tag_explorer_active: bool,
@@ -420,6 +437,8 @@ impl App {
             g_pending: false,
             backlinks: Vec::new(),
             backlinks_selected: 0,
+            backlinks_cache_valid: false,
+            cached_backlink_target: None,
             tag_explorer_active: false,
             all_tags: Vec::new(),
             tag_selected: 0,
@@ -651,7 +670,7 @@ impl App {
 
     /// Open or create today's daily note and switch editor to it.
     pub fn open_daily_note(&mut self) -> Result<()> {
-        let date = Local::now().format("%Y-%m-%d").to_string();
+        let date = Local::now().format(DAILY_NOTE_DATE_FORMAT).to_string();
         let folder = self.notes_dir.join(self.config.daily_notes_folder.trim());
         fs::create_dir_all(&folder)?;
         let path = folder.join(format!("{date}.md"));
@@ -797,6 +816,7 @@ impl App {
             }
         }
         self.editor_dirty = false;
+        self.backlinks_cache_valid = false;
         if need_reload {
             let _ = self.reload_config();
         }
@@ -1272,10 +1292,19 @@ impl App {
     }
 
     /// Scan for backlinks to the current file. Returns paths of files containing [[`current_file_name`]].
+    /// Uses a cache to avoid re-scanning on every call.
     pub fn scan_backlinks(&mut self) {
+        let current_path = self.editing_path();
+        if self.backlinks_cache_valid
+            && self.cached_backlink_target.as_ref() == current_path.as_ref()
+        {
+            return;
+        }
         self.backlinks.clear();
         self.backlinks_selected = 0;
-        let current_file_name = match self.editing_path() {
+        self.cached_backlink_target = current_path.clone();
+
+        let current_file_name = match current_path.as_ref() {
             Some(p) => p
                 .file_stem()
                 .and_then(|s| s.to_str())
@@ -1286,7 +1315,6 @@ impl App {
             return;
         };
         let pattern = format!("[[{target_name}]]");
-        let current_path = self.editing_path();
 
         for entry in WalkDir::new(&self.notes_dir)
             .follow_links(true)
@@ -1571,7 +1599,7 @@ impl App {
     pub fn insert_date_at_cursor(&mut self) {
         let idx = self.focused_buffer_index();
         let Some(buf) = self.buffers.get_mut(idx) else { return };
-        let date = Local::now().format("%Y-%m-%d").to_string();
+        let date = Local::now().format(DAILY_NOTE_DATE_FORMAT).to_string();
         let (r, c) = buf.textarea.cursor();
         let l = buf.textarea.lines().to_vec();
         let (date, row, col, mut lines) = (date, r, c, l);
