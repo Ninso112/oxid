@@ -435,7 +435,7 @@ pub fn key_display_string(s: &str) -> String {
 pub struct Config {
     /// Directory where markdown notes are stored.
     pub notes_directory: String,
-    /// Folder for daily notes (journal), relative to notes_directory.
+    /// Folder for daily notes (journal), relative to `notes_directory`.
     pub daily_notes_folder: String,
     #[serde(default)]
     pub theme: ThemeConfig,

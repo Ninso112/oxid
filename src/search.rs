@@ -13,9 +13,9 @@ pub fn filter_notes(notes: &[NoteEntry], query: &str, matcher: &mut Matcher) -> 
     }
 
     let pattern = Pattern::parse(query, CaseMatching::Ignore, Normalization::Smart);
-    let matches = pattern.match_list(notes, matcher);
+    let results = pattern.match_list(notes, matcher);
 
-    matches
+    results
         .into_iter()
         .map(|(entry, _)| entry.clone())
         .collect()

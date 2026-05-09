@@ -359,7 +359,7 @@ impl App {
         let notes_dir = expand_path(&config.notes_directory);
 
         fs::create_dir_all(&notes_dir)
-            .map_err(|e| anyhow::anyhow!("Failed to create notes directory: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Failed to create notes directory: {e}"))?;
 
         let current_dir = notes_dir.clone();
         let all_notes = load_entries(&current_dir)?;
@@ -478,7 +478,7 @@ impl App {
         }
         self.current_dir = entry.path.clone();
         if let Err(e) = self.refresh_notes() {
-            self.message = Some(format!("Cannot read directory: {}", e));
+            self.message = Some(format!("Cannot read directory: {e}"));
         }
         true
     }
@@ -499,10 +499,10 @@ impl App {
             .current_dir
             .file_name()
             .and_then(|n| n.to_str())
-            .map(|s| format!("{}/", s));
+            .map(|s| format!("{s}/"));
         self.current_dir = parent;
         if let Err(e) = self.refresh_notes() {
-            self.message = Some(format!("Cannot read directory: {}", e));
+            self.message = Some(format!("Cannot read directory: {e}"));
             return true;
         }
         if let Some(name) = prev_folder_name {
@@ -654,9 +654,9 @@ impl App {
         let date = Local::now().format("%Y-%m-%d").to_string();
         let folder = self.notes_dir.join(self.config.daily_notes_folder.trim());
         fs::create_dir_all(&folder)?;
-        let path = folder.join(format!("{}.md", date));
+        let path = folder.join(format!("{date}.md"));
         if !path.exists() {
-            let header = format!("# Daily Note: {}\n\n", date);
+            let header = format!("# Daily Note: {date}\n\n");
             fs::write(&path, header)?;
         }
         self.load_file_into_editor(path)
@@ -668,6 +668,7 @@ impl App {
     }
 
     /// Load file and optionally move cursor to the given 0-based line.
+    #[allow(clippy::unnecessary_wraps)]
     pub fn load_file_into_editor_at_line(
         &mut self,
         path: PathBuf,
@@ -685,7 +686,9 @@ impl App {
             if let Some(line) = goto_line {
                 if let Some(buf) = self.buffers.get_mut(idx) {
                     let row = line.min(buf.textarea.lines().len().saturating_sub(1));
-                    buf.textarea.move_cursor(CursorMove::Jump(row as u16, 0));
+                    #[allow(clippy::cast_possible_truncation)]
+                #[allow(clippy::cast_possible_truncation)]
+                buf.textarea.move_cursor(CursorMove::Jump(row as u16, 0));
                 }
             }
             return Ok(());
@@ -694,7 +697,7 @@ impl App {
         let lines: Vec<String> = if content.is_empty() {
             vec![String::new()]
         } else {
-            content.lines().map(|s| s.to_string()).collect()
+            content.lines().map(std::string::ToString::to_string).collect()
         };
         let mut buf = EditorBuffer::new(Some(path), lines);
         buf.textarea.set_max_histories(50);
@@ -743,10 +746,7 @@ impl App {
 
     /// Perform delete after user confirmed with y.
     pub fn confirm_delete(&mut self) -> Result<()> {
-        let entry = match self.delete_pending.take() {
-            Some(e) => e,
-            None => return Ok(()),
-        };
+        let Some(entry) = self.delete_pending.take() else { return Ok(()) };
         let path = entry.path.clone();
         let is_directory = entry.is_directory;
         self.focus = Focus::List;
@@ -815,10 +815,7 @@ impl App {
         if !self.config.editor.auto_save || !self.editor_dirty {
             return Ok(false);
         }
-        let last = match self.last_keystroke_time {
-            Some(t) => t,
-            None => return Ok(false),
-        };
+        let Some(last) = self.last_keystroke_time else { return Ok(false) };
         let interval = Duration::from_secs(self.config.editor.auto_save_interval);
         if Instant::now().duration_since(last) < interval {
             return Ok(false);

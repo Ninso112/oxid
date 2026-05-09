@@ -246,7 +246,7 @@ editor_code_keyword = {}
 # Status bar (footer)
 statusbar_bg = {}
 statusbar_fg = {}
-"#,
+        "#,
         cv(&theme.app_background),
         cv(&theme.border),
         cv(&theme.header),

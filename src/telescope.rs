@@ -81,8 +81,8 @@ pub fn filter_telescope_notes(
     }
 
     let pattern = Pattern::parse(query, CaseMatching::Ignore, Normalization::Smart);
-    let matches = pattern.match_list(notes, matcher);
-    matches
+    let results = pattern.match_list(notes, matcher);
+    results
         .into_iter()
         .map(|(entry, _)| entry.clone())
         .collect()
