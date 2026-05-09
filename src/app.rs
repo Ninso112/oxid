@@ -1372,7 +1372,7 @@ impl App {
     pub fn scan_all_tags(&mut self) {
         use std::collections::HashSet;
         let mut tags = HashSet::new();
-        let re = Regex::new(r"#(\w+)").unwrap();
+        let Ok(re) = Regex::new(r"#(\w+)") else { return };
 
         for entry in WalkDir::new(&self.notes_dir)
             .follow_links(true)
@@ -1659,7 +1659,7 @@ impl App {
             self.message = Some("No Markdown file open".to_string());
             return;
         };
-        if !path.extension().is_some_and(|e| e == "md") {
+        if path.extension().is_none_or(|e| e != "md") {
             self.message = Some("No Markdown file open".to_string());
             return;
         }

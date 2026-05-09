@@ -132,7 +132,7 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App)
                                 app.exit_command_palette();
                             }
                             CommandAction::ExportPdf => {
-                                let _ = app.export_to_pdf();
+                                app.export_to_pdf();
                                 app.exit_command_palette();
                             }
                             CommandAction::GitPush => {
@@ -349,7 +349,7 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App)
             }
             Focus::Editor => {
                 if key_matches(key, &[k.editor_pdf]) {
-                    let _ = app.export_to_pdf();
+                                app.export_to_pdf();
                     continue;
                 }
                 if key_matches(key, &[k.editor_backlinks]) && app.config.editor.show_backlinks {
