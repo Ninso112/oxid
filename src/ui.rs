@@ -345,8 +345,7 @@ fn draw_delete_confirm_popup(frame: &mut Frame, app: &App, area: Rect) {
     let name = app
         .delete_pending
         .as_ref()
-        .map(|e| e.display.as_str())
-        .unwrap_or("?");
+        .map_or("?", |e| e.display.as_str());
     let content = Line::from(vec![
         Span::styled("Delete ", app.theme.help_text_style),
         Span::styled(name, app.theme.highlight_style),
@@ -390,7 +389,7 @@ fn draw_tag_explorer_popup(frame: &mut Frame, app: &App, area: Rect) {
                 } else {
                     app.theme.list_text_normal_style
                 };
-                ListItem::new(Line::from(Span::styled(format!("#{}", tag), style)))
+                ListItem::new(Line::from(Span::styled(format!("#{tag}"), style)))
             })
             .collect();
 
@@ -406,8 +405,7 @@ fn draw_tag_explorer_popup(frame: &mut Frame, app: &App, area: Rect) {
         let selected_tag = app
             .all_tags
             .get(app.tag_selected)
-            .map(|s| s.as_str())
-            .unwrap_or("");
+            .map_or("", std::string::String::as_str);
         let items: Vec<ListItem> = app
             .tag_files
             .iter()
@@ -415,13 +413,15 @@ fn draw_tag_explorer_popup(frame: &mut Frame, app: &App, area: Rect) {
             .map(|(i, path)| {
                 let display = path
                     .strip_prefix(&app.notes_dir)
-                    .map(|p| p.display().to_string())
-                    .unwrap_or_else(|_| {
-                        path.file_name()
-                            .and_then(|n| n.to_str())
-                            .unwrap_or("")
-                            .to_string()
-                    });
+                    .map_or_else(
+                        |_| {
+                            path.file_name()
+                                .and_then(|n| n.to_str())
+                                .unwrap_or("")
+                                .to_string()
+                        },
+                        |p| p.display().to_string(),
+                    );
                 let style = if i == app.tag_file_selected {
                     app.theme.list_text_selected_style
                 } else {
@@ -476,16 +476,18 @@ fn draw_task_view_popup(frame: &mut Frame, app: &App, area: Rect) {
             let rel_path = task
                 .path
                 .strip_prefix(&app.notes_dir)
-                .map(|p| p.display().to_string())
-                .unwrap_or_else(|_| {
-                    task.path
-                        .file_name()
-                        .and_then(|n| n.to_str())
-                        .unwrap_or("")
-                        .to_string()
-                });
+                .map_or_else(
+                    |_| {
+                        task.path
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or("")
+                            .to_string()
+                    },
+                    |p| p.display().to_string(),
+                );
             let display = if task.content.is_empty() {
-                format!("(empty) [{}]", rel_path)
+                format!("(empty) [{rel_path}]")
             } else {
                 format!("{} [{}]", task.content, rel_path)
             };
@@ -601,7 +603,7 @@ fn draw_tab_bar(frame: &mut Frame, app: &App, area: Rect) {
             } else {
                 Span::raw("")
             };
-            vec![Span::styled(format!(" {} ", name), style), sep]
+            vec![Span::styled(format!(" {name} "), style), sep]
         })
         .collect();
     let line = if tab_spans.is_empty() {
@@ -650,7 +652,8 @@ fn draw_notes_list(frame: &mut Frame, app: &App, area: Rect) {
             let icon = app.file_icon(&note.path);
             let display_text = format!("{}{}", icon, note.display);
             let line = if app.mode == Mode::Search && !app.search_query.is_empty() {
-                let offset = icon.chars().count() as u32;
+                #[allow(clippy::cast_possible_truncation)]
+            let offset = icon.chars().count() as u32;
                 let shifted: Vec<u32> = app
                     .match_indices
                     .get(i)
@@ -679,8 +682,7 @@ fn draw_notes_list(frame: &mut Frame, app: &App, area: Rect) {
             " Notes ({}) ",
             app.current_dir
                 .strip_prefix(&app.notes_dir)
-                .map(|p| format!(".../{}", p.display()))
-                .unwrap_or_else(|_| app.current_dir.display().to_string())
+                .map_or_else(|_| app.current_dir.display().to_string(), |p| format!(".../{}", p.display()))
         )
     };
     let border_type = border_type_from_config(&app.config.ui.border_style);
@@ -805,15 +807,17 @@ fn draw_backlinks_pane(frame: &mut Frame, app: &App, area: Rect) {
         .iter()
         .enumerate()
         .map(|(i, path)| {
-            let display = path
-                .strip_prefix(&app.notes_dir)
-                .map(|p| p.display().to_string())
-                .unwrap_or_else(|_| {
-                    path.file_name()
-                        .and_then(|n| n.to_str())
-                        .unwrap_or("")
-                        .to_string()
-                });
+                let display = path
+                    .strip_prefix(&app.notes_dir)
+                    .map_or_else(
+                        |_| {
+                            path.file_name()
+                                .and_then(|n| n.to_str())
+                                .unwrap_or("")
+                                .to_string()
+                        },
+                        |p| p.display().to_string(),
+                    );
             let style = if i == app.backlinks_selected {
                 app.theme.list_text_selected_style
             } else {

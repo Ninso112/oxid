@@ -177,7 +177,7 @@ impl Default for KeysConfig {
     }
 }
 
-/// Parses a key string (e.g. "ctrl-q", "enter", "f1") into a KeyEvent.
+/// Parses a key string (e.g. "ctrl-q", "enter", "f1") into a `KeyEvent`.
 pub fn parse_key_event(s: &str) -> Option<KeyEvent> {
     let s = s.trim().to_lowercase();
     if s.is_empty() {
@@ -232,7 +232,7 @@ pub fn parse_key_event(s: &str) -> Option<KeyEvent> {
     Some(KeyEvent::new(code, modifiers))
 }
 
-/// Resolved keybindings (parsed KeyEvents for fast comparison).
+/// Resolved keybindings (parsed `KeyEvent`s for fast comparison).
 #[derive(Debug, Clone)]
 pub struct ResolvedKeys {
     pub quit: KeyEvent,
@@ -397,7 +397,7 @@ pub fn key_display_string(s: &str) -> String {
                 "shift" => "Shift",
                 _ => *p,
             })
-            .map(|s| s.to_string())
+            .map(std::string::ToString::to_string)
             .collect();
         (mod_str.join("+"), parts[parts.len() - 1])
     } else {
@@ -425,7 +425,7 @@ pub fn key_display_string(s: &str) -> String {
     if mods.is_empty() {
         key_display
     } else {
-        format!("{}+{}", mods, key_display)
+        format!("{mods}+{key_display}")
     }
 }
 

@@ -28,10 +28,10 @@ impl Spellchecker {
 
     fn load_dict(lang: &str) -> Vec<String> {
         let paths = [
-            format!("/usr/share/dict/{}-words", lang),
-            format!("/usr/share/dict/{}", lang),
-            format!("/usr/share/hunspell/{}.dic", lang),
-            format!("/usr/share/myspell/dicts/{}.dic", lang),
+            format!("/usr/share/dict/{lang}-words"),
+            format!("/usr/share/dict/{lang}"),
+            format!("/usr/share/hunspell/{lang}.dic"),
+            format!("/usr/share/myspell/dicts/{lang}.dic"),
         ];
 
         for path in &paths {
@@ -40,7 +40,7 @@ impl Spellchecker {
                     .lines()
                     .filter_map(|l| {
                         let word = l.split('/').next()?.trim().to_string();
-                        if word.chars().all(|c| c.is_alphabetic()) && word.len() > 1 {
+                        if word.chars().all(char::is_alphabetic) && word.len() > 1 {
                             Some(word)
                         } else {
                             None
@@ -57,7 +57,7 @@ impl Spellchecker {
                     .lines()
                     .filter_map(|l| {
                         let word = l.trim().to_string();
-                        if word.chars().all(|c| c.is_alphabetic()) && word.len() > 1 {
+                        if word.chars().all(char::is_alphabetic) && word.len() > 1 {
                             Some(word)
                         } else {
                             None

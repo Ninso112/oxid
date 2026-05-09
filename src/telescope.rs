@@ -18,7 +18,7 @@ pub fn find_md_files_recursive(dir: &Path) -> Vec<NoteEntry> {
     for entry in WalkDir::new(dir)
         .follow_links(true)
         .into_iter()
-        .filter_map(|e| e.ok())
+        .filter_map(std::result::Result::ok)
     {
         let path = entry.path();
         if path.is_file() {
@@ -36,15 +36,12 @@ pub fn find_md_files_recursive(dir: &Path) -> Vec<NoteEntry> {
             }
         }
     }
-    notes.sort_by(|a, b| a.display.to_lowercase().cmp(&b.display.to_lowercase()));
+    notes.sort_by_key(|a| a.display.to_lowercase());
     notes
 }
 
 fn read_note_content(path: &Path, display: &str) -> (String, String) {
-    let file = match fs::File::open(path) {
-        Ok(f) => f,
-        Err(_) => return (String::new(), display.to_string()),
-    };
+    let Ok(file) = fs::File::open(path) else { return (String::new(), display.to_string()) };
     let mut buf = Vec::with_capacity(MAX_CONTENT_BYTES + 1);
     let mut take = file.take(MAX_CONTENT_BYTES as u64);
     if take.read_to_end(&mut buf).is_err() {
@@ -53,7 +50,7 @@ fn read_note_content(path: &Path, display: &str) -> (String, String) {
     let content = String::from_utf8_lossy(&buf).into_owned();
     let tags = parse_tags(&content);
     let tag_str: String = tags.into_iter().collect::<Vec<_>>().join(" ");
-    let searchable = format!("{}\n{}\n{}", display, content, tag_str);
+    let searchable = format!("{display}\n{content}\n{tag_str}");
     (content, searchable)
 }
 

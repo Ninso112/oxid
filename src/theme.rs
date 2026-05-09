@@ -130,29 +130,29 @@ pub fn parse_color_str(s: &str) -> Result<Color> {
         "orange2" | "dark_orange" => "dark_gray",
         _ => s,
     };
-    Color::from_str(normalized).with_context(|| format!("Invalid color: {}", s))
+    Color::from_str(normalized).with_context(|| format!("Invalid color: {s}"))
 }
 
 fn parse_hex_color(s: &str) -> Result<Color> {
     let s = s.trim_start_matches('#').trim();
     let (r, g, b) = if s.len() == 6 {
         let r = u8::from_str_radix(&s[0..2], 16)
-            .with_context(|| format!("Invalid hex color: {}", s))?;
+            .with_context(|| format!("Invalid hex color: {s}"))?;
         let g = u8::from_str_radix(&s[2..4], 16)
-            .with_context(|| format!("Invalid hex color: {}", s))?;
+            .with_context(|| format!("Invalid hex color: {s}"))?;
         let b = u8::from_str_radix(&s[4..6], 16)
-            .with_context(|| format!("Invalid hex color: {}", s))?;
+            .with_context(|| format!("Invalid hex color: {s}"))?;
         (r, g, b)
     } else if s.len() == 3 {
         let r = u8::from_str_radix(&s[0..1].repeat(2), 16)
-            .with_context(|| format!("Invalid hex color: {}", s))?;
+            .with_context(|| format!("Invalid hex color: {s}"))?;
         let g = u8::from_str_radix(&s[1..2].repeat(2), 16)
-            .with_context(|| format!("Invalid hex color: {}", s))?;
+            .with_context(|| format!("Invalid hex color: {s}"))?;
         let b = u8::from_str_radix(&s[2..3].repeat(2), 16)
-            .with_context(|| format!("Invalid hex color: {}", s))?;
+            .with_context(|| format!("Invalid hex color: {s}"))?;
         (r, g, b)
     } else {
-        anyhow::bail!("Hex color must be #RRGGBB or #RGB, got: {}", s);
+        anyhow::bail!("Hex color must be #RRGGBB or #RGB, got: {s}");
     };
     Ok(Color::Rgb(r, g, b))
 }

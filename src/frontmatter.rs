@@ -9,10 +9,7 @@ use std::collections::HashSet;
 pub fn parse_tags(content: &str) -> HashSet<String> {
     let mut tags = HashSet::new();
 
-    let frontmatter_re = match Regex::new(r"(?s)^---\s*\n(.*?)\n---") {
-        Ok(r) => r,
-        Err(_) => return tags,
-    };
+    let Ok(frontmatter_re) = Regex::new(r"(?s)^---\s*\n(.*?)\n---") else { return tags };
     let frontmatter = match frontmatter_re.captures(content) {
         Some(c) => match c.get(1) {
             Some(m) => m.as_str(),

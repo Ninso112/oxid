@@ -12,7 +12,7 @@ pub enum Template {
 }
 
 impl Template {
-    pub fn name(&self) -> &'static str {
+    pub fn name(self) -> &'static str {
         match self {
             Template::Empty => "Empty",
             Template::DailyNote => "Daily Note",
@@ -21,7 +21,7 @@ impl Template {
     }
 
     /// Generate template content.
-    pub fn content(&self) -> String {
+    pub fn content(self) -> String {
         match self {
             Template::Empty => String::new(),
             Template::DailyNote => format!("# {}\n\n", Local::now().format("%Y-%m-%d")),

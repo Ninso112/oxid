@@ -763,11 +763,7 @@ impl App {
         if self.active_tab >= self.buffers.len() {
             self.active_tab = self.buffers.len().saturating_sub(1);
         }
-        if self
-            .split_right_tab
-            .map(|i| i >= self.buffers.len())
-            .unwrap_or(false)
-        {
+        if self.split_right_tab.is_some_and(|i| i >= self.buffers.len()) {
             self.split_right_tab = None;
         }
         if is_directory {
@@ -946,14 +942,10 @@ impl App {
                 buf.textarea.undo();
                 return true;
             }
-            KeyCode::Char('h') => buf.textarea.move_cursor(CursorMove::Back),
-            KeyCode::Char('j') => buf.textarea.move_cursor(CursorMove::Down),
-            KeyCode::Char('k') => buf.textarea.move_cursor(CursorMove::Up),
-            KeyCode::Char('l') => buf.textarea.move_cursor(CursorMove::Forward),
-            KeyCode::Left => buf.textarea.move_cursor(CursorMove::Back),
-            KeyCode::Right => buf.textarea.move_cursor(CursorMove::Forward),
-            KeyCode::Up => buf.textarea.move_cursor(CursorMove::Up),
-            KeyCode::Down => buf.textarea.move_cursor(CursorMove::Down),
+            KeyCode::Char('h') | KeyCode::Left => buf.textarea.move_cursor(CursorMove::Back),
+            KeyCode::Char('j') | KeyCode::Down => buf.textarea.move_cursor(CursorMove::Down),
+            KeyCode::Char('k') | KeyCode::Up => buf.textarea.move_cursor(CursorMove::Up),
+            KeyCode::Char('l') | KeyCode::Right => buf.textarea.move_cursor(CursorMove::Forward),
             KeyCode::Home => buf.textarea.move_cursor(CursorMove::Head),
             KeyCode::End => buf.textarea.move_cursor(CursorMove::End),
             KeyCode::PageUp => buf.textarea.scroll(Scrolling::PageUp),
@@ -1118,9 +1110,8 @@ impl App {
     }
 
     pub fn rename_selected_note(&mut self) -> Result<()> {
-        let entry = match self.filtered_notes.get(self.selected) {
-            Some(e) => e,
-            None => return Ok(()),
+        let Some(entry) = self.filtered_notes.get(self.selected) else {
+            return Ok(());
         };
         let old_path = entry.path.clone();
         let is_dir = entry.is_directory;
@@ -1129,10 +1120,10 @@ impl App {
             self.message = Some("Name cannot be empty".to_string());
             return Ok(());
         }
-        let name = if is_dir || name.ends_with(".md") {
+        let name = if is_dir || std::path::Path::new(name).extension().is_some_and(|ext| ext.eq_ignore_ascii_case("md")) {
             name.to_string()
         } else {
-            format!("{}.md", name)
+            format!("{name}.md")
         };
         let parent = old_path.parent().unwrap_or(&self.current_dir);
         let new_path = parent.join(&name);
@@ -1184,10 +1175,10 @@ impl App {
             self.message = Some("Directory already exists".to_string());
             return Ok(());
         }
-        fs::create_dir(&path).map_err(|e| anyhow::anyhow!("Failed to create directory: {}", e))?;
+        fs::create_dir(&path).map_err(|e| anyhow::anyhow!("Failed to create directory: {e}"))?;
         self.exit_create_directory();
         self.refresh_notes()?;
-        self.message = Some(format!("Created directory: {}", name));
+        self.message = Some(format!("Created directory: {name}"));
         Ok(())
     }
 
@@ -1206,26 +1197,15 @@ impl App {
     fn toggle_checkbox_at_cursor(&mut self) {
         let idx = self.focused_buffer_index();
         let (row, col, lines) = {
-            let buf = match self.buffers.get_mut(idx) {
-                Some(b) => b,
-                None => return,
-            };
+            let Some(buf) = self.buffers.get_mut(idx) else { return };
             let (r, c) = buf.textarea.cursor();
             let l = buf.textarea.lines().to_vec();
             (r, c, l)
         };
-        let line = match lines.get(row) {
-            Some(l) => l.clone(),
-            None => return,
-        };
-        let re_unchecked = match Regex::new(r"^(\s*[-*]\s+)\[\s?\]") {
-            Ok(r) => r,
-            Err(_) => return,
-        };
-        let re_checked = match Regex::new(r"^(\s*[-*]\s+)\[[xX]\]") {
-            Ok(r) => r,
-            Err(_) => return,
-        };
+        let Some(line) = lines.get(row) else { return };
+        let line = line.clone();
+        let Ok(re_unchecked) = Regex::new(r"^(\s*[-*]\s+)\[\s?\]") else { return };
+        let Ok(re_checked) = Regex::new(r"^(\s*[-*]\s+)\[[xX]\]") else { return };
         let new_line = if re_unchecked.is_match(&line) {
             re_unchecked.replace(&line, "${1}[x]").into_owned()
         } else if re_checked.is_match(&line) {
@@ -1234,14 +1214,16 @@ impl App {
             return;
         };
         let mut new_lines = lines;
-        new_lines[row] = new_line.clone();
+        new_lines[row].clone_from(&new_line);
         let new_col = col.min(new_line.len());
         let theme = self.theme.clone();
         if let Some(buf) = self.buffers.get_mut(idx) {
             buf.textarea = TextArea::new(new_lines);
             buf.textarea.set_max_histories(50);
             Self::apply_theme_to_textarea(&theme, &mut buf.textarea, &self.config.editor);
+            #[allow(clippy::cast_possible_truncation)]
             let r = row as u16;
+            #[allow(clippy::cast_possible_truncation)]
             let c = new_col.min(u16::MAX as usize) as u16;
             buf.textarea.move_cursor(CursorMove::Jump(r, c));
         }
@@ -1267,10 +1249,10 @@ impl App {
 
     pub fn open_wiki_link(&mut self, link: &str) -> Result<()> {
         let _ = self.save_editor();
-        let name = if link.ends_with(".md") {
+        let name = if std::path::Path::new(link).extension().is_some_and(|ext| ext.eq_ignore_ascii_case("md")) {
             link.to_string()
         } else {
-            format!("{}.md", link)
+            format!("{link}.md")
         };
         let path = self
             .editing_path()
@@ -1292,7 +1274,7 @@ impl App {
         Ok(())
     }
 
-    /// Scan for backlinks to the current file. Returns paths of files containing [[current_file_name]].
+    /// Scan for backlinks to the current file. Returns paths of files containing [[`current_file_name`]].
     pub fn scan_backlinks(&mut self) {
         self.backlinks.clear();
         self.backlinks_selected = 0;
@@ -1300,19 +1282,19 @@ impl App {
             Some(p) => p
                 .file_stem()
                 .and_then(|s| s.to_str())
-                .map(|s| s.to_string()),
+                .map(std::string::ToString::to_string),
             None => return,
         };
         let Some(target_name) = current_file_name else {
             return;
         };
-        let pattern = format!("[[{}]]", target_name);
+        let pattern = format!("[[{target_name}]]");
         let current_path = self.editing_path();
 
         for entry in WalkDir::new(&self.notes_dir)
             .follow_links(true)
             .into_iter()
-            .filter_map(|e| e.ok())
+            .filter_map(std::result::Result::ok)
         {
             let path = entry.path();
             if !path.is_file() || path.extension().is_none_or(|e| e != "md") {
@@ -1370,7 +1352,7 @@ impl App {
         for entry in WalkDir::new(&self.notes_dir)
             .follow_links(true)
             .into_iter()
-            .filter_map(|e| e.ok())
+            .filter_map(std::result::Result::ok)
         {
             let path = entry.path();
             if !path.is_file() || path.extension().is_none_or(|e| e != "md") {
@@ -1420,12 +1402,12 @@ impl App {
         if let Some(tag) = self.all_tags.get(self.tag_selected) {
             self.tag_files.clear();
             self.tag_file_selected = 0;
-            let pattern = format!("#{}", tag);
+            let pattern = format!("#{tag}");
 
             for entry in WalkDir::new(&self.notes_dir)
                 .follow_links(true)
                 .into_iter()
-                .filter_map(|e| e.ok())
+                .filter_map(std::result::Result::ok)
             {
                 let path = entry.path();
                 if !path.is_file() || path.extension().is_none_or(|e| e != "md") {
@@ -1470,7 +1452,7 @@ impl App {
         for entry in WalkDir::new(&self.notes_dir)
             .follow_links(true)
             .into_iter()
-            .filter_map(|e| e.ok())
+            .filter_map(std::result::Result::ok)
         {
             let path = entry.path();
             if !path.is_file() || path.extension().is_none_or(|e| e != "md") {
@@ -1573,10 +1555,10 @@ impl App {
         if name.is_empty() {
             return Ok(None);
         }
-        let name = if name.ends_with(".md") {
+        let name = if std::path::Path::new(name).extension().is_some_and(|ext| ext.eq_ignore_ascii_case("md")) {
             name.to_string()
         } else {
-            format!("{}.md", name)
+            format!("{name}.md")
         };
         let path = self.current_dir.join(&name);
         if path.exists() {
@@ -1591,33 +1573,29 @@ impl App {
 
     pub fn insert_date_at_cursor(&mut self) {
         let idx = self.focused_buffer_index();
-        let (date, row, col, mut lines) = {
-            let buf = match self.buffers.get_mut(idx) {
-                Some(b) => b,
-                None => return,
-            };
-            let date = Local::now().format("%Y-%m-%d").to_string();
-            let (r, c) = buf.textarea.cursor();
-            let l = buf.textarea.lines().to_vec();
-            (date, r, c, l)
-        };
-        if let Some(line) = lines.get_mut(row) {
-            let mut s = line.clone();
-            if col <= s.len() {
-                s.insert_str(col, &date);
-            } else {
-                s.push_str(&date);
-            }
-            lines[row] = s;
-            let theme = self.theme.clone();
-            if let Some(buf) = self.buffers.get_mut(idx) {
-                buf.textarea = TextArea::new(lines);
-                buf.textarea.set_max_histories(50);
-                Self::apply_theme_to_textarea(&theme, &mut buf.textarea, &self.config.editor);
-                let r = row as u16;
-                let c = (col + date.len()).min(u16::MAX as usize) as u16;
-                buf.textarea.move_cursor(CursorMove::Jump(r, c));
-            }
+        let Some(buf) = self.buffers.get_mut(idx) else { return };
+        let date = Local::now().format("%Y-%m-%d").to_string();
+        let (r, c) = buf.textarea.cursor();
+        let l = buf.textarea.lines().to_vec();
+        let (date, row, col, mut lines) = (date, r, c, l);
+        let Some(line) = lines.get_mut(row) else { return };
+        let mut s = line.clone();
+        if col <= s.len() {
+            s.insert_str(col, &date);
+        } else {
+            s.push_str(&date);
+        }
+        lines[row] = s;
+        let theme = self.theme.clone();
+        if let Some(buf) = self.buffers.get_mut(idx) {
+            buf.textarea = TextArea::new(lines);
+            buf.textarea.set_max_histories(50);
+            Self::apply_theme_to_textarea(&theme, &mut buf.textarea, &self.config.editor);
+            #[allow(clippy::cast_possible_truncation)]
+            let r = row as u16;
+            #[allow(clippy::cast_possible_truncation)]
+            let c = (col + date.len()).min(u16::MAX as usize) as u16;
+            buf.textarea.move_cursor(CursorMove::Jump(r, c));
         }
     }
 
@@ -1650,15 +1628,17 @@ impl App {
     }
 
     /// Export current buffer to PDF via Pandoc.
-    pub fn export_to_pdf(&mut self) -> Result<()> {
+    pub fn export_to_pdf(&mut self) {
         let buf = self.focused_buffer();
-        let path = match buf.and_then(|b| b.path.as_ref()) {
-            Some(p) if p.extension().is_some_and(|e| e == "md") => p.clone(),
-            _ => {
-                self.message = Some("No Markdown file open".to_string());
-                return Ok(());
-            }
+        let Some(path) = buf.and_then(|b| b.path.as_ref()) else {
+            self.message = Some("No Markdown file open".to_string());
+            return;
         };
+        if !path.extension().is_some_and(|e| e == "md") {
+            self.message = Some("No Markdown file open".to_string());
+            return;
+        }
+        let path = path.clone();
         let _ = self.save_editor();
         let output = path.with_extension("pdf");
         let output_str = output.to_string_lossy();
@@ -1679,7 +1659,6 @@ impl App {
                 self.message = Some("Pandoc not found - install pandoc".to_string());
             }
         }
-        Ok(())
     }
 
     /// Switch to next tab.
@@ -1709,11 +1688,7 @@ impl App {
         if self.active_tab >= self.buffers.len() {
             self.active_tab = self.buffers.len() - 1;
         }
-        if self
-            .split_right_tab
-            .map(|i| i >= self.buffers.len())
-            .unwrap_or(false)
-        {
+        if self.split_right_tab.is_some_and(|i| i >= self.buffers.len()) {
             self.split_right_tab = None;
             self.editor_layout = EditorLayout::Single;
         }
@@ -1736,16 +1711,10 @@ fn load_entries(dir: &PathBuf) -> Result<Vec<NoteEntry>> {
     };
 
     for entry in entries {
-        let entry = match entry {
-            Ok(e) => e,
-            Err(_) => continue,
-        };
+        let Ok(entry) = entry else { continue };
         let path = entry.path();
 
-        let meta = match fs::metadata(&path) {
-            Ok(m) => m,
-            Err(_) => continue,
-        };
+        let Ok(meta) = fs::metadata(&path) else { continue };
 
         if meta.is_dir() {
             let display = path
@@ -1753,7 +1722,7 @@ fn load_entries(dir: &PathBuf) -> Result<Vec<NoteEntry>> {
                 .and_then(|n| n.to_str())
                 .unwrap_or("")
                 .to_string();
-            dirs.push(NoteEntry::dir(path, format!("{}/", display)));
+            dirs.push(NoteEntry::dir(path, format!("{display}/")));
         } else if meta.is_file() && path.extension().is_some_and(|e| e == "md") {
             let display = path
                 .file_name()
@@ -1771,8 +1740,8 @@ fn load_entries(dir: &PathBuf) -> Result<Vec<NoteEntry>> {
         }
     }
 
-    dirs.sort_by(|a, b| a.display.to_lowercase().cmp(&b.display.to_lowercase()));
-    files.sort_by(|a, b| a.display.to_lowercase().cmp(&b.display.to_lowercase()));
+    dirs.sort_by_key(|a| a.display.to_lowercase());
+    files.sort_by_key(|a| a.display.to_lowercase());
 
     let mut result = dirs;
     result.append(&mut files);
@@ -1780,10 +1749,7 @@ fn load_entries(dir: &PathBuf) -> Result<Vec<NoteEntry>> {
 }
 
 fn read_note_content(path: &PathBuf, display: &str) -> (String, String) {
-    let file = match fs::File::open(path) {
-        Ok(f) => f,
-        Err(_) => return (String::new(), display.to_string()),
-    };
+    let Ok(file) = fs::File::open(path) else { return (String::new(), display.to_string()) };
 
     let mut buf = Vec::with_capacity(MAX_CONTENT_BYTES + 1);
     let mut take = file.take(MAX_CONTENT_BYTES as u64);
@@ -1795,6 +1761,6 @@ fn read_note_content(path: &PathBuf, display: &str) -> (String, String) {
     if buf.len() >= MAX_CONTENT_BYTES {
         content.push_str("\n\n(Content truncated - file too large)");
     }
-    let searchable = format!("{}\n{}", display, content);
+    let searchable = format!("{display}\n{content}");
     (content, searchable)
 }
