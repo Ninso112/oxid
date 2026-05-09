@@ -71,6 +71,8 @@ pub struct EditorConfig {
     /// Show line numbers in gutter.
     pub line_numbers: bool,
     /// Relative / hybrid line numbers (when line_numbers is true).
+    /// Reserved for future implementation when tui-textarea supports custom line number formatting.
+    #[allow(dead_code)]
     pub rel_line_numbers: bool,
     /// Tab width in spaces (1–16).
     pub tab_width: u8,

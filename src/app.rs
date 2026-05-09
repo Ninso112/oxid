@@ -1069,8 +1069,7 @@ impl App {
             .filter(|a| a.label().to_lowercase().contains(&q))
             .copied()
             .collect();
-        self.command_palette_selected =
-            0.min(self.command_palette_filtered.len().saturating_sub(1));
+        self.command_palette_selected = 0;
     }
 
     pub fn command_palette_move_up(&mut self) {
@@ -1479,17 +1478,25 @@ impl App {
             }
             let path_buf = path.to_path_buf();
             if let Ok(content) = fs::read_to_string(path) {
+                let mut in_code_block = false;
                 for (zero_based_line, line) in content.lines().enumerate() {
-                    if line.trim_start().starts_with("- [ ]") {
-                        let content = line
-                            .trim_start()
+                    let trimmed = line.trim_start();
+                    if trimmed.starts_with("```") {
+                        in_code_block = !in_code_block;
+                        continue;
+                    }
+                    if in_code_block {
+                        continue;
+                    }
+                    if trimmed.starts_with("- [ ]") {
+                        let task_content = trimmed
                             .trim_start_matches("- [ ]")
                             .trim()
                             .to_string();
                         self.tasks.push(TaskEntry {
                             path: path_buf.clone(),
                             line_number: zero_based_line,
-                            content,
+                            content: task_content,
                         });
                     }
                 }
